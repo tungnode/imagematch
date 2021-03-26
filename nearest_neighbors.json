@@ -1,0 +1,22 @@
+[
+  {
+    "similarity": 1.0,
+    "master_pi": "face1",
+    "similar_pi": "face1"
+  },
+  {
+    "similarity": 1.0,
+    "master_pi": "face1",
+    "similar_pi": "face1Copy"
+  },
+  {
+    "similarity": 1.0,
+    "master_pi": "face1Copy",
+    "similar_pi": "face1"
+  },
+  {
+    "similarity": 1.0,
+    "master_pi": "face1Copy",
+    "similar_pi": "face1Copy"
+  }
+]
