@@ -44,7 +44,7 @@ def get_image_feature_vectors():
  # Loads the module
  module = hub.load(module_handle)
 # Loops through all images in a local folder
- for filename in glob.glob('.\\*.jfif'):
+ for filename in glob.glob('..\\copyHunter\\scripts\\images\\*.jpeg'):
  
   print(filename)
 # Loads and pre-process the image
@@ -57,7 +57,7 @@ def get_image_feature_vectors():
   # Saves the image feature vectors into a file for later use
   outfile_name = os.path.basename(filename) + ".npz"
  
-  out_path = os.path.join('.\\',outfile_name)
+  out_path = os.path.join('.\\vectors\\',outfile_name)
 # Saves the 'feature_set' to a text file
   np.savetxt(out_path, feature_set, delimiter=',')
 get_image_feature_vectors()

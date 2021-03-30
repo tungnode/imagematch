@@ -62,7 +62,7 @@ def cluster():
     trees = 10000
 
     # Reads all file names which stores feature vectors
-    allfiles = glob.glob('.\\*.npz')
+    allfiles = glob.glob('.\\vectors\\*.npz')
 
     t = AnnoyIndex(dims, metric='angular')
     for file_index, i in enumerate(allfiles):
@@ -106,17 +106,20 @@ def cluster():
             # product id values of the similar item
             neighbor_file_name = file_index_to_file_name[j]
             neighbor_file_vector = file_index_to_file_vector[j]
-            neighbor_product_id = file_index_to_product_id[j]
+            # neighbor_product_id = file_index_to_product_id[j]
             # Calculates the similarity score of the similar item
             similarity = 1 - spatial.distance.cosine(master_vector, neighbor_file_vector)
             rounded_similarity = int((similarity * 10000)) / 10000.0
 
             # Appends master product id with the similarity score
             # and the product id of the similar items
-            named_nearest_neighbors.append({
+            if(rounded_similarity > 0.9):
+               named_nearest_neighbors.append({
                 'similarity': rounded_similarity,
-                'master_pi': master_product_id,
-                'similar_pi': neighbor_product_id})
+                'master_pi': master_file_name,
+                'similar_pi': neighbor_file_name})     
+            
+            
         print("---------------------------------")
         print("Similarity index       : %s" % i)
         print("Master Image file name : %s" % file_index_to_file_name[i])
