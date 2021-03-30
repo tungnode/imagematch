@@ -113,7 +113,7 @@ def cluster():
 
             # Appends master product id with the similarity score
             # and the product id of the similar items
-            if(rounded_similarity > 0.9):
+            if((rounded_similarity > 0.9) & (master_file_name != neighbor_file_name)):
                named_nearest_neighbors.append({
                 'similarity': rounded_similarity,
                 'master_pi': master_file_name,
