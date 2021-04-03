@@ -23,15 +23,29 @@ from scipy import spatial
 # Returns the product id when product image names are matched
 # So it is used to find product id based on the product image name
 #################################################
-def match_id(filename):
-    with open('.\\image_data.json') as json_file:
-        for file in json_file:
-            seen = json.loads(file)
-            for line in seen:
-                if filename == line['imageName']:
-                    print(line)
-                    return line['productId']
-                    break
+
+with open('..\\copyHunter\\scripts\\owners_data.json') as json_file:
+    map_of_token_with_owners = json.load(json_file)
+
+def is_legit_token(master_file_name,neighbor_file_name):
+    
+    master_token = master_file_name.split("_")[0]
+    neighbor_token = neighbor_file_name.split("_")[0]
+    master_token_owners = map_of_token_with_owners[master_token]
+    neighbor_token_owners = map_of_token_with_owners[neighbor_token]
+
+    for master_owners in master_token_owners:
+        for neighbor_owners in neighbor_token_owners:
+            master_from = master_owners['from']
+            master_to = master_owners['to']
+            neighbor_from = neighbor_owners['from']
+            neighbor_to = neighbor_owners['to']
+            if (((master_from != '0x0000000000000000000000000000000000000000') and ((master_from == neighbor_from) or (master_from == neighbor_to)))
+                or ((master_to != '0x0000000000000000000000000000000000000000') and ((master_to == neighbor_from) or (master_to == neighbor_to)))):
+                return True;
+    
+    return False;
+
 
 
 #################################################
@@ -54,7 +68,6 @@ def cluster():
     # Defining data structures as empty dict
     file_index_to_file_name = {}
     file_index_to_file_vector = {}
-    file_index_to_product_id = {}
 
     # Configuring annoy parameters
     dims = 1792
@@ -73,7 +86,6 @@ def cluster():
         file_name = os.path.basename(i).split('.')[0]
         file_index_to_file_name[file_index] = file_name
         file_index_to_file_vector[file_index] = file_vector
-        file_index_to_product_id[file_index] = match_id(file_name)
 
         # Adds image feature vectors into annoy index
         t.add_item(file_index, file_vector)
@@ -81,7 +93,6 @@ def cluster():
         print("---------------------------------")
         print("Annoy index     : %s" % file_index)
         print("Image file name : %s" % file_name)
-        print("Product id      : %s" % file_index_to_product_id[file_index])
         print("--- %.2f minutes passed ---------" % ((time.time() - start_time) / 60))
     # Builds annoy index
     t.build(trees)
@@ -96,7 +107,6 @@ def cluster():
         # and product id values
         master_file_name = file_index_to_file_name[i]
         master_vector = file_index_to_file_vector[i]
-        master_product_id = file_index_to_product_id[i]
         # Calculates the nearest neighbors of the master item
         nearest_neighbors = t.get_nns_by_item(i, n_nearest_neighbors)
         # Loops through the nearest neighbors of the master item
@@ -106,20 +116,19 @@ def cluster():
             # product id values of the similar item
             neighbor_file_name = file_index_to_file_name[j]
             neighbor_file_vector = file_index_to_file_vector[j]
-            # neighbor_product_id = file_index_to_product_id[j]
+
             # Calculates the similarity score of the similar item
             similarity = 1 - spatial.distance.cosine(master_vector, neighbor_file_vector)
             rounded_similarity = int((similarity * 10000)) / 10000.0
 
             # Appends master product id with the similarity score
             # and the product id of the similar items
-            if((rounded_similarity > 0.9) & (master_file_name != neighbor_file_name)):
-               named_nearest_neighbors.append({
-                'similarity': rounded_similarity,
-                'master_pi': master_file_name,
-                'similar_pi': neighbor_file_name})     
-            
-            
+            if ((rounded_similarity > 0.98) and (master_file_name != neighbor_file_name) and is_legit_token(master_file_name,neighbor_file_name) == False):
+                    named_nearest_neighbors.append({
+                            'similarity': rounded_similarity,
+                            'master_pi': master_file_name,
+                            'similar_pi': neighbor_file_name})
+
         print("---------------------------------")
         print("Similarity index       : %s" % i)
         print("Master Image file name : %s" % file_index_to_file_name[i])
