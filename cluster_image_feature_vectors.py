@@ -46,6 +46,19 @@ def is_legit_token(master_file_name,neighbor_file_name):
     
     return False;
 
+neighbor_master_map = {};
+def is_already_exist(master_file_name,neighbor_file_name):
+    if neighbor_file_name not in neighbor_master_map:
+        neighbor_master_map[neighbor_file_name] = {master_file_name};
+        return False;
+    else:
+        similars_of_neighbor = neighbor_master_map[neighbor_file_name];
+        if neighbor_file_name in similars_of_neighbor:
+            return True;
+        else:
+            similars_of_neighbor.add(neighbor_file_name);
+            return False;   
+
 
 
 #################################################
@@ -99,7 +112,7 @@ def cluster():
 
     print("Step.1 - ANNOY index generation - Finished")
     print("Step.2 - Similarity score calculation - Started ")
-
+    
     named_nearest_neighbors = []
     # Loops through all indexed items
     for i in file_index_to_file_name.keys():
@@ -123,7 +136,9 @@ def cluster():
 
             # Appends master product id with the similarity score
             # and the product id of the similar items
-            if ((rounded_similarity > 0.98) and (master_file_name != neighbor_file_name) and is_legit_token(master_file_name,neighbor_file_name) == False):
+            if ((rounded_similarity > 0.98) and (master_file_name != neighbor_file_name) 
+                and (is_legit_token(master_file_name,neighbor_file_name) == False)
+                and (is_already_exist(master_file_name,neighbor_file_name) == False)):
                     named_nearest_neighbors.append({
                             'similarity': rounded_similarity,
                             'master_pi': master_file_name,
