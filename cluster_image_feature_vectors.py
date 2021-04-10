@@ -43,18 +43,14 @@ def is_legit_token(master_file_name,neighbor_file_name):
     
     return False;
 
-neighbor_master_map = {};
+neighbor_master_set = set();
 def is_already_exist(master_file_name,neighbor_file_name):
-    if neighbor_file_name not in neighbor_master_map:
-        neighbor_master_map[neighbor_file_name] = {master_file_name};
+    new_neighbor_master_set = frozenset([master_file_name,neighbor_file_name])
+    if new_neighbor_master_set not in neighbor_master_set:
+        neighbor_master_set.add(new_neighbor_master_set)
         return False;
     else:
-        similars_of_neighbor = neighbor_master_map[neighbor_file_name];
-        if neighbor_file_name in similars_of_neighbor:
-            return True;
-        else:
-            similars_of_neighbor.add(neighbor_file_name);
-            return False;   
+        return True;
 
 
 
