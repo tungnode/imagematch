@@ -35,7 +35,7 @@ def is_legit_token(master_file_name,neighbor_file_name):
         neighbor_token_owners = map_of_token_with_owners.get(neighbor_token);
 
         for master_address in master_token_owners:
-            if ((master_address != '0x0000000000000000000000000000000000000000') and (master_address == neighbor_token_owners[master_address])):
+            if ((master_address != '0x0000000000000000000000000000000000000000') and (master_address == neighbor_token_owners.get(master_address))):
                 return True;
     except Exception as error:
         print(error)
