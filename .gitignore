@@ -1,4 +1,6 @@
 /.idea
 /.vs
-/images
+/images*
 /vectors
+/vectors_bk
+/matchedImages*
