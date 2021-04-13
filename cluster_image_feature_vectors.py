@@ -16,7 +16,7 @@ from annoy import AnnoyIndex
 from scipy import spatial
 import threading
 import multiprocessing
-
+from multiprocessing import Pool
 
 
 
@@ -148,27 +148,96 @@ def create_multi_processes(start_time):
 # Calculates the nearest neighbors and image similarity metrics
 # Stores image similarity scores with productID in a json file
 #################################################
-def cluster():
+def consumer(lock,queue,named_nearest_neighbors):
+    
+    while True:
+        msg = queue.get()
+        if (msg['status'] == 'DONE'):
+            break
+        master_file_path = msg['master_file_path']
+        neighbor_file_path = msg['neighbor_file_path']
+        # print("---------------------------------")
+        # print("Step.1 - ANNOY index generation - Started at %s"
+        #     % time.ctime())
+        # print("---------------------------------")
+        
+        master_file_vector = np.loadtxt(master_file_path)
+        neighbor_file_vector = np.loadtxt(neighbor_file_path)
+
+        # Assigns file_name, feature_vectors and corresponding product_id
+        
+        master_file_name = os.path.basename(master_file_path).split('.')[0]
+        neighbor_file_name = os.path.basename(neighbor_file_path).split('.')[0]
+    
+        # print("Step.1 - ANNOY index generation - Finished")
+        # print("Step.2 - Similarity score calculation - Started ")
+        
+        
+        similarity = 1 - spatial.distance.cosine(master_file_vector, neighbor_file_vector)
+        rounded_similarity = int((similarity * 10000)) / 10000.0
+
+        if rounded_similarity >= 0.98:
+            lock.acquire()
+            named_nearest_neighbors.append({
+                                'similarity': rounded_similarity,
+                                'master_pi': master_file_name,
+                                'similar_pi': neighbor_file_name})
+            lock.release()
+            return {
+                    'similarity': rounded_similarity,
+                    'master_pi': master_file_name,
+                    'similar_pi': neighbor_file_name}
+    
+number_of_processes = 6
+def producer(queue,start,end):
+    allfiles = glob.glob('.\\vectors\\*.npz')
+    for master_file_index in range(start,end):
+        for neighbor_file_index in range (master_file_index,len(allfiles)):
+            print(master_file_index,"_",neighbor_file_index)
+            queue.put({'status':'working','master_file_path':allfiles[master_file_index],'neighbor_file_path':allfiles[neighbor_file_index]})
+            
+
+    for _ in range(number_of_processes):
+        queue.put({'status':'DONE'})
+#################################################
+# Global variables ##############################
+
+if __name__ == '__main__':
     start_time = time.time()
-
-    print("---------------------------------")
-    print("Step.1 - ANNOY index generation - Started at %s"
-          % time.ctime())
-    print("---------------------------------")
-
+    lock = multiprocessing.Lock()
+    manager = multiprocessing.Manager()
+    named_nearest_neighbors = manager.list()
+    queue = multiprocessing.Queue()
+    consumer_processes = []
+    for i in range(number_of_processes):
+        consumer_process = multiprocessing.Process(target=consumer, args=[lock,queue,named_nearest_neighbors])
+        consumer_process.daemon = True
+        consumer_process.start()
+        consumer_processes.append(consumer_process)
     
-
-    create_annoy_index(allfiles,start_time,0,len(allfiles))#len(allfiles)
+    # for i in range(2):
+    p1 = multiprocessing.Process(target=producer, args=[queue,0,15000])
+    # p2 = multiprocessing.Process(target=producer, args=[queue,10000,20000])
+    p1.start()
+    # p2.start()
+    allfiles = glob.glob('.\\vectors\\*.npz')
+    producer(queue,15000,len(allfiles)-15000)
+    p1.join()
+    # p2.join()
+    for consumer_process in consumer_processes:
+        consumer_process.join()
     
-
-    # Builds annoy index
-    t.build(trees)
-    t.save(".\\annoy_trees_5000")
-    print("Step.1 - ANNOY index generation - Finished")
-    print("Step.2 - Similarity score calculation - Started ")
     
-    
-    create_multi_processes(start_time)
+        # with open('..\\copyHunter\\scripts\\owners_data.json') as json_file:
+        #     map_of_token_with_owners = json.load(json_file)
+    # with Pool() as pool:
+       
+    #     queue = multiprocessing.Queue()
+    #     # result = pool.map(double, [1, 2, 3, 4, 5])
+    #     allfiles = glob.glob('.\\vectors\\*.npz')
+    #     results = [pool.apply(cluster, args=(named_nearest_neighbors,allfiles[file_index],allfiles[file_index+1])) for file_index in range(0,len(allfiles)-1)]
+    #     # Reads all file names which stores feature vectors
+        
 
     print("Step.2 - Similarity score calculation - Finished ")
     # Writes the 'named_nearest_neighbors' to a json file
@@ -176,33 +245,12 @@ def cluster():
         json.dump(list(named_nearest_neighbors), out)
     print("Step.3 - Data stored in 'nearest_neighbors.json' file ")
     print("--- Prosess completed in %.2f minutes ---------" %
-          ((time.time() - start_time) / 60))
-
-#################################################
-# Global variables ##############################
-
-if __name__ == '__main__':
-    with multiprocessing.Manager() as manager:
-        with open('..\\copyHunter\\scripts\\owners_data.json') as json_file:
-            map_of_token_with_owners = json.load(json_file)
-
-        # Reads all file names which stores feature vectors
-        allfiles = glob.glob('.\\vectors\\*.npz')
-
-    
-        # Configuring annoy parameters
-        dims = 1792
-        n_nearest_neighbors = 20
-        trees = 10000
-        t = AnnoyIndex(dims, metric='angular')
-        manager = multiprocessing.Manager()
-        # Defining data structures as empty dict
-        file_index_to_file_name = {}
-        file_index_to_file_vector = {}
-        named_nearest_neighbors = manager.list()
-        neighbor_master_set = manager.dict()
+        ((time.time() - start_time) / 60))
         
-        try:
-            cluster()
-        except Exception as error:
-            print(error)
+        # manager = multiprocessing.Manager()
+        # Defining data structures as empty dict
+        
+        
+        # neighbor_master_set = manager.dict()
+        
+       
