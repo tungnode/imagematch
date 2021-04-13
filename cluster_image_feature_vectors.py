@@ -27,7 +27,7 @@ import multiprocessing
 # Returns the product id when product image names are matched
 # So it is used to find product id based on the product image name
 #################################################
-def is_legit_token(master_file_name,neighbor_file_name):
+def is_legit_token(master_file_name,neighbor_file_name,map_of_token_with_owners):
     try:
         master_token = master_file_name.split("_")[0]
         neighbor_token = neighbor_file_name.split("_")[0]
@@ -43,11 +43,11 @@ def is_legit_token(master_file_name,neighbor_file_name):
     
     return False;
 
-neighbor_master_set = set();
-def is_already_exist(master_file_name,neighbor_file_name):
+
+def is_already_exist(master_file_name,neighbor_file_name,neighbor_master_set):
     new_neighbor_master_set = frozenset([master_file_name,neighbor_file_name])
     if new_neighbor_master_set not in neighbor_master_set:
-        neighbor_master_set.add(new_neighbor_master_set)
+        neighbor_master_set[new_neighbor_master_set] = new_neighbor_master_set
         return False;
     else:
         return True;
@@ -67,7 +67,7 @@ def create_annoy_index(files_list,start_time,start_index,stop_index):
 
         # Adds image feature vectors into annoy index
         # lock.acquire()
-        annoy_list[0].add_item(file_index, file_vector)
+        t.add_item(file_index, file_vector)
         # lock.release()
         print("---------------------------------")
         print("Annoy index     : %s" % file_index)
@@ -76,50 +76,15 @@ def create_annoy_index(files_list,start_time,start_index,stop_index):
         # if file_index == trees:
         #     break
 #################################################
-#################################################
-# This function:
-# Reads all image feature vectores stored in /feature-vectors/*.npz
-# Adds them all in Annoy Index
-# Builds ANNOY index
-# Calculates the nearest neighbors and image similarity metrics
-# Stores image similarity scores with productID in a json file
-#################################################
-def cluster():
-    start_time = time.time()
 
-    print("---------------------------------")
-    print("Step.1 - ANNOY index generation - Started at %s"
-          % time.ctime())
-    print("---------------------------------")
-
-    number_of_files = len(allfiles)
-
-    # creating a lock
-    lock = threading.Lock()
-    item_per_thread = int(number_of_files/16)
-    thread_list = []
-    for i in range(8):
-        th = multiprocessing.Process(target=create_annoy_index, args=(allfiles,start_time,i*item_per_thread,i*item_per_thread+item_per_thread,))
-        thread_list.append(th)
-
-    last_thread = multiprocessing.Process(target=create_annoy_index, args=(allfiles,start_time,16*item_per_thread,number_of_files-16*item_per_thread,))
-    thread_list.append(last_thread)
-
-    for thread in thread_list:
-        thread.start()
-    for thread in thread_list:
-        thread.join()
-    
-
-    # Builds annoy index
-    t.build(trees)
-
-    print("Step.1 - ANNOY index generation - Finished")
-    print("Step.2 - Similarity score calculation - Started ")
-    
-    named_nearest_neighbors = []
+def similarity_check(start_time,file_index_to_file_name,file_index_to_file_vector,start_index,end_index,map_of_token_with_owners,neighbor_master_set,named_nearest_neighbors):
+    dims = 1792
+    n_nearest_neighbors = 20
+    trees = 15000
+    t = AnnoyIndex(dims, metric='angular')
+    t.load(".\\annoy_trees")
     # Loops through all indexed items
-    for i in file_index_to_file_name.keys():
+    for i in range(start_index,end_index):
         # Assigns master file_name, image feature vectors
         # and product id values
         master_file_name = file_index_to_file_name[i]
@@ -140,9 +105,9 @@ def cluster():
 
             # Appends master product id with the similarity score
             # and the product id of the similar items
-            if ((rounded_similarity >= 0.9) and (master_file_name != neighbor_file_name) 
-                and (is_legit_token(master_file_name,neighbor_file_name) == False)
-                and (is_already_exist(master_file_name,neighbor_file_name) == False)):
+            if ((rounded_similarity >= 0.98) and (master_file_name != neighbor_file_name) 
+                and (is_legit_token(master_file_name,neighbor_file_name,map_of_token_with_owners) == False)
+                and (is_already_exist(master_file_name,neighbor_file_name,neighbor_master_set) == False)):
                     named_nearest_neighbors.append({
                             'similarity': rounded_similarity,
                             'master_pi': master_file_name,
@@ -154,10 +119,61 @@ def cluster():
         print("Nearest Neighbors.     : %s" % nearest_neighbors)
         print("--- %.2f minutes passed ---------" % ((time.time() - start_time) / 60))
 
+
+def create_multi_processes(start_time):
+    number_of_files = len(file_index_to_file_name)
+     # creating a lock
+    lock = multiprocessing.Lock()
+    item_per_process = int(number_of_files/2)
+    processes_list = []
+    for i in range(1):
+        p = multiprocessing.Process(target=similarity_check, args=(start_time,file_index_to_file_name,file_index_to_file_vector,i*item_per_process,i*item_per_process+item_per_process,map_of_token_with_owners,neighbor_master_set,named_nearest_neighbors))
+        processes_list.append(p)
+
+    last_process = multiprocessing.Process(target=similarity_check, args=(start_time,file_index_to_file_name,file_index_to_file_vector,1*item_per_process,number_of_files-1*item_per_process,map_of_token_with_owners,neighbor_master_set,named_nearest_neighbors))
+    processes_list.append(last_process)
+
+    for pro in processes_list:
+        pro.start()
+    for pro in processes_list:
+        pro.join()
+    
+
+   
+#################################################
+# This function:
+# Reads all image feature vectores stored in /feature-vectors/*.npz
+# Adds them all in Annoy Index
+# Builds ANNOY index
+# Calculates the nearest neighbors and image similarity metrics
+# Stores image similarity scores with productID in a json file
+#################################################
+def cluster():
+    start_time = time.time()
+
+    print("---------------------------------")
+    print("Step.1 - ANNOY index generation - Started at %s"
+          % time.ctime())
+    print("---------------------------------")
+
+    
+
+    create_annoy_index(allfiles,start_time,0,len(allfiles))#len(allfiles)
+    
+
+    # Builds annoy index
+    t.build(trees)
+    t.save(".\\annoy_trees_5000")
+    print("Step.1 - ANNOY index generation - Finished")
+    print("Step.2 - Similarity score calculation - Started ")
+    
+    
+    create_multi_processes(start_time)
+
     print("Step.2 - Similarity score calculation - Finished ")
     # Writes the 'named_nearest_neighbors' to a json file
     with open('nearest_neighbors.json', 'w') as out:
-        json.dump(named_nearest_neighbors, out)
+        json.dump(list(named_nearest_neighbors), out)
     print("Step.3 - Data stored in 'nearest_neighbors.json' file ")
     print("--- Prosess completed in %.2f minutes ---------" %
           ((time.time() - start_time) / 60))
@@ -166,23 +182,27 @@ def cluster():
 # Global variables ##############################
 
 if __name__ == '__main__':
-    with open('..\\copyHunter\\scripts\\owners_data.json') as json_file:
-        map_of_token_with_owners = json.load(json_file)
+    with multiprocessing.Manager() as manager:
+        with open('..\\copyHunter\\scripts\\owners_data.json') as json_file:
+            map_of_token_with_owners = json.load(json_file)
 
-    # Reads all file names which stores feature vectors
-    allfiles = glob.glob('.\\vectors\\*.npz')
+        # Reads all file names which stores feature vectors
+        allfiles = glob.glob('.\\vectors\\*.npz')
 
-    # Defining data structures as empty dict
-    file_index_to_file_name = {}
-    file_index_to_file_vector = {}
-    # Configuring annoy parameters
-    dims = 1792
-    n_nearest_neighbors = 20
-    trees = 15000
-    manager = multiprocessing.Manager()
-    annoy_list = manager.list()
-    annoy_list.append(AnnoyIndex(dims, metric='angular'))
-    try:
-        cluster()
-    except Exception as error:
-        print(error)
+    
+        # Configuring annoy parameters
+        dims = 1792
+        n_nearest_neighbors = 20
+        trees = 10000
+        t = AnnoyIndex(dims, metric='angular')
+        manager = multiprocessing.Manager()
+        # Defining data structures as empty dict
+        file_index_to_file_name = {}
+        file_index_to_file_vector = {}
+        named_nearest_neighbors = manager.list()
+        neighbor_master_set = manager.dict()
+        
+        try:
+            cluster()
+        except Exception as error:
+            print(error)
