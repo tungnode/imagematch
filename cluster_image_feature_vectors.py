@@ -14,10 +14,6 @@ import json
 # Annoy and Scipy for similarity calculation
 from annoy import AnnoyIndex
 from scipy import spatial
-import threading
-import multiprocessing
-from multiprocessing import Pool
-import tensorflow as tf
 
 
 #################################################
@@ -27,7 +23,11 @@ import tensorflow as tf
 # Returns the product id when product image names are matched
 # So it is used to find product id based on the product image name
 #################################################
-def is_legit_token(master_file_name,neighbor_file_name,map_of_token_with_owners):
+
+with open('..\\copyHunter\\scripts\\owners_data.json') as json_file:
+    map_of_token_with_owners = json.load(json_file)
+
+def is_legit_token(master_file_name,neighbor_file_name):
     try:
         master_token = master_file_name.split("_")[0]
         neighbor_token = neighbor_file_name.split("_")[0]
@@ -43,48 +43,73 @@ def is_legit_token(master_file_name,neighbor_file_name,map_of_token_with_owners)
     
     return False;
 
-
-def is_already_exist(master_file_name,neighbor_file_name,neighbor_master_set):
+neighbor_master_set = set();
+def is_already_exist(master_file_name,neighbor_file_name):
     new_neighbor_master_set = frozenset([master_file_name,neighbor_file_name])
     if new_neighbor_master_set not in neighbor_master_set:
-        neighbor_master_set[new_neighbor_master_set] = new_neighbor_master_set
+        neighbor_master_set.add(new_neighbor_master_set)
         return False;
     else:
         return True;
 
 
-def create_annoy_index(files_list,start_time,start_index,stop_index):
-    for file_index in range(start_index,stop_index):
-        file_path = files_list[file_index]
+
+#################################################
+#################################################
+# This function:
+# Reads all image feature vectores stored in /feature-vectors/*.npz
+# Adds them all in Annoy Index
+# Builds ANNOY index
+# Calculates the nearest neighbors and image similarity metrics
+# Stores image similarity scores with productID in a json file
+#################################################
+def cluster():
+    start_time = time.time()
+
+    print("---------------------------------")
+    print("Step.1 - ANNOY index generation - Started at %s"
+          % time.ctime())
+    print("---------------------------------")
+
+    # Defining data structures as empty dict
+    file_index_to_file_name = {}
+    file_index_to_file_vector = {}
+
+    # Configuring annoy parameters
+    dims = 1792
+    n_nearest_neighbors = 20
+    trees = 10000
+
+    # Reads all file names which stores feature vectors
+    allfiles = glob.glob('.\\post_nmslib\\*.npz')
+
+    t = AnnoyIndex(dims, metric='angular')
+    for file_index, i in enumerate(allfiles):
         # Reads feature vectors and assigns them into the file_vector
-        file_vector = np.loadtxt(file_path)
+        file_vector = np.loadtxt(i)
 
         # Assigns file_name, feature_vectors and corresponding product_id
-        
-        file_name = os.path.basename(file_path).split('.')[0]
+        file_name = os.path.basename(i).split('.')[0]
         file_index_to_file_name[file_index] = file_name
         file_index_to_file_vector[file_index] = file_vector
 
         # Adds image feature vectors into annoy index
-        # lock.acquire()
         t.add_item(file_index, file_vector)
-        # lock.release()
         print("---------------------------------")
         print("Annoy index     : %s" % file_index)
         print("Image file name : %s" % file_name)
         print("--- %.2f minutes passed ---------" % ((time.time() - start_time) / 60))
         # if file_index == trees:
         #     break
-#################################################
+    # Builds annoy index
+    t.build(trees)
 
-def similarity_check(start_time,file_index_to_file_name,file_index_to_file_vector,start_index,end_index,map_of_token_with_owners,neighbor_master_set,named_nearest_neighbors):
-    dims = 1792
-    n_nearest_neighbors = 20
-    trees = 15000
-    t = AnnoyIndex(dims, metric='angular')
-    t.load(".\\annoy_trees")
+    print("Step.1 - ANNOY index generation - Finished")
+    print("Step.2 - Similarity score calculation - Started ")
+    
+    named_nearest_neighbors = []
     # Loops through all indexed items
-    for i in range(start_index,end_index):
+    for i in file_index_to_file_name.keys():
         # Assigns master file_name, image feature vectors
         # and product id values
         master_file_name = file_index_to_file_name[i]
@@ -105,9 +130,9 @@ def similarity_check(start_time,file_index_to_file_name,file_index_to_file_vecto
 
             # Appends master product id with the similarity score
             # and the product id of the similar items
-            if ((rounded_similarity >= 0.98) and (master_file_name != neighbor_file_name) 
-                and (is_legit_token(master_file_name,neighbor_file_name,map_of_token_with_owners) == False)
-                and (is_already_exist(master_file_name,neighbor_file_name,neighbor_master_set) == False)):
+            if ((rounded_similarity > 0.98) and (master_file_name != neighbor_file_name) 
+                and (is_legit_token(master_file_name,neighbor_file_name) == False)
+                and (is_already_exist(master_file_name,neighbor_file_name) == False)):
                     named_nearest_neighbors.append({
                             'similarity': rounded_similarity,
                             'master_pi': master_file_name,
@@ -119,112 +144,13 @@ def similarity_check(start_time,file_index_to_file_name,file_index_to_file_vecto
         print("Nearest Neighbors.     : %s" % nearest_neighbors)
         print("--- %.2f minutes passed ---------" % ((time.time() - start_time) / 60))
 
+    print("Step.2 - Similarity score calculation - Finished ")
+    # Writes the 'named_nearest_neighbors' to a json file
+    with open('nearest_neighbors.json', 'w') as out:
+        json.dump(named_nearest_neighbors, out)
+    print("Step.3 - Data stored in 'nearest_neighbors.json' file ")
+    print("--- Prosess completed in %.2f minutes ---------" %
+          ((time.time() - start_time) / 60))
 
-def create_multi_processes(start_time):
-    number_of_files = len(file_index_to_file_name)
-     # creating a lock
-    lock = multiprocessing.Lock()
-    item_per_process = int(number_of_files/2)
-    processes_list = []
-    for i in range(1):
-        p = multiprocessing.Process(target=similarity_check, args=(start_time,file_index_to_file_name,file_index_to_file_vector,i*item_per_process,i*item_per_process+item_per_process,map_of_token_with_owners,neighbor_master_set,named_nearest_neighbors))
-        processes_list.append(p)
 
-    last_process = multiprocessing.Process(target=similarity_check, args=(start_time,file_index_to_file_name,file_index_to_file_vector,1*item_per_process,number_of_files-1*item_per_process,map_of_token_with_owners,neighbor_master_set,named_nearest_neighbors))
-    processes_list.append(last_process)
-
-    for pro in processes_list:
-        pro.start()
-    for pro in processes_list:
-        pro.join()
-    
-
-   
-#################################################
-# This function:
-# Reads all image feature vectores stored in /feature-vectors/*.npz
-# Adds them all in Annoy Index
-# Builds ANNOY index
-# Calculates the nearest neighbors and image similarity metrics
-# Stores image similarity scores with productID in a json file
-#################################################
-def consumer(lock,queue,named_nearest_neighbors):
-    
-    while True:
-        msg = queue.get()
-        if (msg['status'] == 'DONE'):
-            break
-        master_file_path = msg['master_file_path']
-        neighbor_file_path = msg['neighbor_file_path']
-        # print("---------------------------------")
-        # print("Step.1 - ANNOY index generation - Started at %s"
-        #     % time.ctime())
-        # print("---------------------------------")
-        
-        master_file_vector = np.loadtxt(master_file_path)
-        neighbor_file_vector = np.loadtxt(neighbor_file_path)
-
-        # Assigns file_name, feature_vectors and corresponding product_id
-        
-        master_file_name = os.path.basename(master_file_path).split('.')[0]
-        neighbor_file_name = os.path.basename(neighbor_file_path).split('.')[0]
-    
-        # print("Step.1 - ANNOY index generation - Finished")
-        # print("Step.2 - Similarity score calculation - Started ")
-        
-        
-        similarity = 1 - spatial.distance.cosine(master_file_vector, neighbor_file_vector)
-        rounded_similarity = int((similarity * 10000)) / 10000.0
-
-        if rounded_similarity >= 0.98:
-            lock.acquire()
-            named_nearest_neighbors.append({
-                                'similarity': rounded_similarity,
-                                'master_pi': master_file_name,
-                                'similar_pi': neighbor_file_name})
-            lock.release()
-            return {
-                    'similarity': rounded_similarity,
-                    'master_pi': master_file_name,
-                    'similar_pi': neighbor_file_name}
-    
-number_of_processes = 6
-def producer(queue,start,end):
-    allfiles = glob.glob('.\\vectors\\*.npz')
-    for master_file_index in range(start,end):
-        for neighbor_file_index in range (master_file_index,7000):
-            print(master_file_index,"_",neighbor_file_index)
-            queue.put({'status':'working','master_file_path':allfiles[master_file_index],'neighbor_file_path':allfiles[neighbor_file_index]})
-            
-
-    for _ in range(number_of_processes):
-        queue.put({'status':'DONE'})
-#################################################
-# Global variables ##############################
-
-if __name__ == '__main__':
-    # with tf.device('/gpu:0'):
-        start_time = time.time()
-        allfiles = glob.glob('.\\vectors\\*.npz')
-        total_files = len(allfiles)
-  
-
-        
-       
-            
-
-        print("Step.2 - Similarity score calculation - Finished ")
-        # Writes the 'named_nearest_neighbors' to a json file
-        with open('nearest_neighbors.json', 'w') as out:
-            json.dump(list(named_nearest_neighbors), out)
-        print("Step.3 - Data stored in 'nearest_neighbors.json' file ")
-        print("--- Prosess completed in %.2f minutes ---------" %
-            ((time.time() - start_time) / 60))
-            
-            # manager = multiprocessing.Manager()
-            # Defining data structures as empty dict
-            
-            
-            # neighbor_master_set = manager.dict()
-        
-       
+cluster()
