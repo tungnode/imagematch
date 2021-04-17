@@ -14,6 +14,8 @@ from multiprocessing.shared_memory import SharedMemory
 from multiprocessing.managers import SharedMemoryManager
 import json
 import os.path
+import logging
+logging.basicConfig(level=logging.DEBUG)
 
 def load_glob_worker(all_files,file_name_index,data_set,start,end,lock):
     # all_files = glob.glob('.\\vectors_test\\*.npz')
@@ -38,7 +40,7 @@ def load_glob_worker(all_files,file_name_index,data_set,start,end,lock):
         lock.release()
 
 def load_glob(all_vectors_data_set,file_index,start,end,lock):
-    all_files = glob.glob('.\\vectors_test\\*.npz')
+    all_files = glob.glob('.\\vectors\\*.npz')
     vector_data = []
     for index in range(start,end):
         file_index[index] = all_files[index]
@@ -48,26 +50,26 @@ def is_legit_token(master_file_name,neighbor_file_name,map_of_token_with_owners)
     try:
         master_token = master_file_name.split("_")[0]
         neighbor_token = neighbor_file_name.split("_")[0]
-        master_token_owners = map_of_token_with_owners.get(master_token);
-        neighbor_token_owners = map_of_token_with_owners.get(neighbor_token);
+        master_token_owners = map_of_token_with_owners.get(master_token)
+        neighbor_token_owners = map_of_token_with_owners.get(neighbor_token)
 
         for master_address in master_token_owners:
             if ((master_address != '0x0000000000000000000000000000000000000000') and (master_address == neighbor_token_owners.get(master_address))):
-                return True;
+                return True
     except Exception as error:
         print(error)
-        return True;            
+        return True    
     
-    return False;
+    return False
 
 
 def is_already_exist(master_file_name,neighbor_file_name,neighbor_master_set):
     new_neighbor_master_set = frozenset([master_file_name,neighbor_file_name])
     if new_neighbor_master_set not in neighbor_master_set:
         neighbor_master_set[new_neighbor_master_set] = new_neighbor_master_set
-        return False;
+        return False
     else:
-        return True;
+        return True
 
 with open('..\\copyHunter\\scripts\\owners_data.json') as json_file:
     map_of_token_with_owners = json.load(json_file)
@@ -75,7 +77,7 @@ neighbor_master_map = {}
 if __name__ == '__main__':
     # load image vector files
     all_files = glob.glob('.\\vectors\\*.npz')
-    total_files = len(all_files)
+    total_files = 10000#len(all_files)
     lock = multiprocessing.Lock()
     manager = multiprocessing.Manager()
     data_set = manager.list()
@@ -96,6 +98,7 @@ if __name__ == '__main__':
 
     for p in range(number_of_processes):
         processes_list[p].join()
+    # load_glob_worker(all_files,file_name_index,data_set,0,total_files,lock)
     print("======================",len(data_set))
     # data_set = []
     # file_indexes = {}
@@ -107,8 +110,9 @@ if __name__ == '__main__':
     # initialize a new index, using a HNSW index on Cosine Similarity
     index = nmslib.init(method='hnsw', space='cosinesimil')
     index.addDataPointBatch(data_set)
-    index.createIndex({'post': 2}, print_progress=True)
-
+    index.createIndex({'post': 2,'efConstruction':10000,'M':100,}, print_progress=True)
+    # index.createIndex({'numPivot':5000,'numPivotIndex':5000})
+    print(index)
     # query for the nearest neighbours of the first datapoint
     # ids, distances = index.knnQuery(data_set, k=10)
     

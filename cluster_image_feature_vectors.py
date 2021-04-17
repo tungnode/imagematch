@@ -17,7 +17,7 @@ from scipy import spatial
 import threading
 import multiprocessing
 from multiprocessing import Pool
-
+import tensorflow as tf
 
 
 #################################################
@@ -192,7 +192,7 @@ number_of_processes = 6
 def producer(queue,start,end):
     allfiles = glob.glob('.\\vectors\\*.npz')
     for master_file_index in range(start,end):
-        for neighbor_file_index in range (master_file_index,len(allfiles)):
+        for neighbor_file_index in range (master_file_index,7000):
             print(master_file_index,"_",neighbor_file_index)
             queue.put({'status':'working','master_file_path':allfiles[master_file_index],'neighbor_file_path':allfiles[neighbor_file_index]})
             
@@ -203,54 +203,28 @@ def producer(queue,start,end):
 # Global variables ##############################
 
 if __name__ == '__main__':
-    start_time = time.time()
-    lock = multiprocessing.Lock()
-    manager = multiprocessing.Manager()
-    named_nearest_neighbors = manager.list()
-    queue = multiprocessing.Queue()
-    consumer_processes = []
-    for i in range(number_of_processes):
-        consumer_process = multiprocessing.Process(target=consumer, args=[lock,queue,named_nearest_neighbors])
-        consumer_process.daemon = True
-        consumer_process.start()
-        consumer_processes.append(consumer_process)
-    
-    # for i in range(2):
-    p1 = multiprocessing.Process(target=producer, args=[queue,0,15000])
-    # p2 = multiprocessing.Process(target=producer, args=[queue,10000,20000])
-    p1.start()
-    # p2.start()
-    allfiles = glob.glob('.\\vectors\\*.npz')
-    producer(queue,15000,len(allfiles)-15000)
-    p1.join()
-    # p2.join()
-    for consumer_process in consumer_processes:
-        consumer_process.join()
-    
-    
-        # with open('..\\copyHunter\\scripts\\owners_data.json') as json_file:
-        #     map_of_token_with_owners = json.load(json_file)
-    # with Pool() as pool:
-       
-    #     queue = multiprocessing.Queue()
-    #     # result = pool.map(double, [1, 2, 3, 4, 5])
-    #     allfiles = glob.glob('.\\vectors\\*.npz')
-    #     results = [pool.apply(cluster, args=(named_nearest_neighbors,allfiles[file_index],allfiles[file_index+1])) for file_index in range(0,len(allfiles)-1)]
-    #     # Reads all file names which stores feature vectors
-        
+    # with tf.device('/gpu:0'):
+        start_time = time.time()
+        allfiles = glob.glob('.\\vectors\\*.npz')
+        total_files = len(allfiles)
+  
 
-    print("Step.2 - Similarity score calculation - Finished ")
-    # Writes the 'named_nearest_neighbors' to a json file
-    with open('nearest_neighbors.json', 'w') as out:
-        json.dump(list(named_nearest_neighbors), out)
-    print("Step.3 - Data stored in 'nearest_neighbors.json' file ")
-    print("--- Prosess completed in %.2f minutes ---------" %
-        ((time.time() - start_time) / 60))
         
-        # manager = multiprocessing.Manager()
-        # Defining data structures as empty dict
-        
-        
-        # neighbor_master_set = manager.dict()
+       
+            
+
+        print("Step.2 - Similarity score calculation - Finished ")
+        # Writes the 'named_nearest_neighbors' to a json file
+        with open('nearest_neighbors.json', 'w') as out:
+            json.dump(list(named_nearest_neighbors), out)
+        print("Step.3 - Data stored in 'nearest_neighbors.json' file ")
+        print("--- Prosess completed in %.2f minutes ---------" %
+            ((time.time() - start_time) / 60))
+            
+            # manager = multiprocessing.Manager()
+            # Defining data structures as empty dict
+            
+            
+            # neighbor_master_set = manager.dict()
         
        
