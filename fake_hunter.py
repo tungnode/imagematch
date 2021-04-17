@@ -102,16 +102,23 @@ if __name__ == '__main__':
     # get all nearest neighbours for all the datapoint
     # using a pool of 4 threads to compute
     all_nearest_data = index.knnQueryBatch(data_set, k=5, num_threads=4)
-    for master_idx_distance in enumerate(all_nearest_data):
-        master_index = master_idx_distance[0]
-        master_neighbors_index = master_idx_distance[1][0]
-        master_neighbors_distances = master_idx_distance[1][1]
-        for index_distance in enumerate(master_neighbors_distances,1):
-            distance_to_neighbor = index_distance[1]
-            if distance_to_neighbor <= 0.02:
-                master_file_path = file_name_index[master_index]
-                neighbor_file_path = file_name_index[master_neighbors_index[index_distance[0]]]
-                named_nearest_neighbors.append({
-                            'similarity': str(distance_to_neighbor),
-                            'master_pi': master_file_path,
-                            'similar_pi': neighbor_file_path})    
+    for master_index, master in enumerate(all_nearest_data):
+        master_neighbors_index =master[0]
+        master_neighbors_distances = master[1]
+        for index_of_distance_to_neighbor, distance_to_neighbor in enumerate(master_neighbors_distances):
+            if index_of_distance_to_neighbor != 0:
+                if distance_to_neighbor <= 0.02:
+                    master_file_path = file_name_index[master_index]
+                    neighbor_file_path = file_name_index[master_neighbors_index[index_of_distance_to_neighbor]]
+                    named_nearest_neighbors.append({
+                                'similarity': str(distance_to_neighbor),
+                                'master_pi': master_file_path,
+                                'similar_pi': neighbor_file_path})    
+
+    print("Step.2 - Similarity score calculation - Finished ")
+    # Writes the 'named_nearest_neighbors' to a json file
+    with open('nearest_neighbors.json', 'w') as out:
+        json.dump(list(named_nearest_neighbors), out)
+    print("Step.3 - Data stored in 'nearest_neighbors.json' file ")
+    print("--- Prosess completed in %.2f minutes ---------" %
+        ((time.time() - start_time) / 60))
