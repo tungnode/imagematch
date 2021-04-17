@@ -23,4 +23,6 @@ for similar_pair in similar_tokens:
         copyfile("..\\copyHunter\\scripts\\images\\"+similar_pair['similar_pi']+".jpg", ".\\matchedImages\\"+similar_pair['similar_pi']+".jpg")
     else:
         copyfile("..\\copyHunter\\scripts\\images\\"+similar_pair['similar_pi']+".png", ".\\matchedImages\\"+similar_pair['similar_pi']+".png")
+
+
     

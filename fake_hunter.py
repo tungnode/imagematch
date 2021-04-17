@@ -22,29 +22,29 @@ def load_glob_worker(all_files,file_name_index,data_set,start,end,lock):
     n = random.randint(3,10)
     vector_data = []
     for index in range(start,end):
-        # data_set.append(np.loadtxt(all_files[index]))
-        file_name = os.path.basename(all_files[index]).split('.')[0]
-        file_name_index[index] = file_name
-        if n > 0:
-            vector_data.append(np.loadtxt(all_files[index]))
-            n -= 1
-        else:    
-            lock.acquire()
-            data_set.extend(vector_data)
-            lock.release()
-            n = random.randint(1,10)
-            vector_data.clear()
-    if len(vector_data) != 0:
-        lock.acquire()
-        data_set.extend(vector_data)
-        lock.release()
+        data_set.append(np.loadtxt(all_files[index]))
+        # file_name = os.path.basename(all_files[index]).split('.')[0]
+        file_name_index[index] = all_files[index]
+    #     if n > 0:
+    #         vector_data.append(np.loadtxt(all_files[index]))
+    #         n -= 1
+    #     else:    
+    #         lock.acquire()
+    #         data_set.extend(vector_data)
+    #         lock.release()
+    #         n = random.randint(1,10)
+    #         vector_data.clear()
+    # if len(vector_data) != 0:
+    #     lock.acquire()
+    #     data_set = data_set + vector_data
+    #     lock.release()
 
-def load_glob(all_vectors_data_set,file_index,start,end,lock):
-    all_files = glob.glob('.\\vectors\\*.npz')
-    vector_data = []
-    for index in range(start,end):
-        file_index[index] = all_files[index]
-        all_vectors_data_set.append(np.loadtxt(all_files[index]))
+# def load_glob(all_vectors_data_set,file_index,start,end,lock):
+#     all_files = glob.glob('.\\vectors_test_data\\*.npz')
+#     vector_data = []
+#     for index in range(start,end):
+#         file_index[index] = all_files[index]
+#         all_vectors_data_set.append(np.loadtxt(all_files[index]))
 
 def is_legit_token(master_file_name,neighbor_file_name,map_of_token_with_owners):
     try:
@@ -77,28 +77,29 @@ neighbor_master_map = {}
 if __name__ == '__main__':
     # load image vector files
     all_files = glob.glob('.\\vectors\\*.npz')
-    total_files = 10000#len(all_files)
+    total_files = len(all_files)
+    print(total_files)
     lock = multiprocessing.Lock()
-    manager = multiprocessing.Manager()
-    data_set = manager.list()
-    file_name_index = manager.dict()
+    # multiprocessing.Array('i', 4)
+    data_set = []# manager.list()
+    file_name_index = {}#manager.dict()
     start_time = time.time()
     named_nearest_neighbors = []
     
  
-    number_of_processes = 6
-    processes_list = []
-    item_per_process = int(total_files/number_of_processes)
+    # number_of_processes = 5
+    # processes_list = []
+    # item_per_process = int(total_files/number_of_processes)
 
-    for p in range(number_of_processes):
-        processes_list.append(multiprocessing.Process(target=load_glob_worker, args=(all_files,file_name_index,data_set,p*item_per_process,p*item_per_process+item_per_process,lock)))
+    # for p in range(number_of_processes):
+    #     processes_list.append(multiprocessing.Process(target=load_glob_worker, args=(all_files,file_name_index,data_set,p*item_per_process,p*item_per_process+item_per_process,lock)))
 
-    for p in range(number_of_processes):
-        processes_list[p].start()
+    # for p1 in range(number_of_processes):
+    #     processes_list[p1].start()
 
-    for p in range(number_of_processes):
-        processes_list[p].join()
-    # load_glob_worker(all_files,file_name_index,data_set,0,total_files,lock)
+    # for p2 in range(number_of_processes):
+    #     processes_list[p2].join()
+    load_glob_worker(all_files,file_name_index,data_set,0,total_files,lock)
     print("======================",len(data_set))
     # data_set = []
     # file_indexes = {}
@@ -110,7 +111,7 @@ if __name__ == '__main__':
     # initialize a new index, using a HNSW index on Cosine Similarity
     index = nmslib.init(method='hnsw', space='cosinesimil')
     index.addDataPointBatch(data_set)
-    index.createIndex({'post': 2,'efConstruction':10000,'M':100,}, print_progress=True)
+    index.createIndex({'post': 2,'efConstruction':1000,'M':50,}, print_progress=True)
     # index.createIndex({'numPivot':5000,'numPivotIndex':5000})
     print(index)
     # query for the nearest neighbours of the first datapoint
@@ -124,19 +125,19 @@ if __name__ == '__main__':
         master_neighbors_index =master[0]
         master_neighbors_distances = master[1]
         for index_of_distance_to_neighbor, distance_to_neighbor in enumerate(master_neighbors_distances):
-            if index_of_distance_to_neighbor != 0:
+            # if index_of_distance_to_neighbor != 0:
                 if distance_to_neighbor <= 0.02:
                     master_file_path = file_name_index[master_index]
                     neighbor_index = master_neighbors_index[index_of_distance_to_neighbor]
                     neighbor_file_path = file_name_index[neighbor_index]
-
-                    similarity = 1 - spatial.distance.cosine(data_set[master_index], data_set[neighbor_index])
-                    rounded_similarity = int((similarity * 10000)) / 10000.0
-                    if((rounded_similarity >= 0.99) 
-                        and (is_legit_token(master_file_path,neighbor_file_path,map_of_token_with_owners) == False)
-                        and (is_already_exist(master_file_path,neighbor_file_path,neighbor_master_map) == False)):
+                    if( master_file_path != neighbor_file_path):
+                    # similarity = 1 - spatial.distance.cosine(data_set[master_index], data_set[neighbor_index])
+                    # rounded_similarity = int((similarity * 10000)) / 10000.0
+                    # if((rounded_similarity >= 0.99) 
+                    #     and (is_legit_token(master_file_path,neighbor_file_path,map_of_token_with_owners) == False)
+                    #     and (is_already_exist(master_file_path,neighbor_file_path,neighbor_master_map) == False)):
                         named_nearest_neighbors.append({
-                                    'spatial_similarity': str(rounded_similarity),
+                                    # 'spatial_similarity': str(rounded_similarity),
                                     'nmslib_similarity': str(distance_to_neighbor),
                                     'master_pi': master_file_path,
                                     'similar_pi': neighbor_file_path})    
