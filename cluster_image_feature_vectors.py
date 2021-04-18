@@ -28,36 +28,29 @@ with open('..\\copyHunter\\scripts\\owners_data.json') as json_file:
     map_of_token_with_owners = json.load(json_file)
 
 def is_legit_token(master_file_name,neighbor_file_name):
-    
-    master_token = master_file_name.split("_")[0]
-    neighbor_token = neighbor_file_name.split("_")[0]
-    master_token_owners = map_of_token_with_owners[master_token]
-    neighbor_token_owners = map_of_token_with_owners[neighbor_token]
+    try:
+        master_token = master_file_name.split("_")[0]
+        neighbor_token = neighbor_file_name.split("_")[0]
+        master_token_owners = map_of_token_with_owners.get(master_token);
+        neighbor_token_owners = map_of_token_with_owners.get(neighbor_token);
 
-    for master_owners in master_token_owners:
-        for neighbor_owners in neighbor_token_owners:
-            master_from = master_owners['from']
-            master_to = master_owners['to']
-            neighbor_from = neighbor_owners['from']
-            neighbor_to = neighbor_owners['to']
-            if (((master_from != '0x0000000000000000000000000000000000000000') and ((master_from == neighbor_from) or (master_from == neighbor_to)))
-                or ((master_to != '0x0000000000000000000000000000000000000000') and ((master_to == neighbor_from) or (master_to == neighbor_to)))):
+        for master_address in master_token_owners:
+            if ((master_address != '0x0000000000000000000000000000000000000000') and (master_address == neighbor_token_owners.get(master_address))):
                 return True;
+    except Exception as error:
+        print(error)
+        return True;            
     
     return False;
 
-neighbor_master_map = {};
+neighbor_master_set = set();
 def is_already_exist(master_file_name,neighbor_file_name):
-    if neighbor_file_name not in neighbor_master_map:
-        neighbor_master_map[neighbor_file_name] = {master_file_name};
+    new_neighbor_master_set = frozenset([master_file_name,neighbor_file_name])
+    if new_neighbor_master_set not in neighbor_master_set:
+        neighbor_master_set.add(new_neighbor_master_set)
         return False;
     else:
-        similars_of_neighbor = neighbor_master_map[neighbor_file_name];
-        if neighbor_file_name in similars_of_neighbor:
-            return True;
-        else:
-            similars_of_neighbor.add(neighbor_file_name);
-            return False;   
+        return True;
 
 
 
@@ -88,7 +81,7 @@ def cluster():
     trees = 10000
 
     # Reads all file names which stores feature vectors
-    allfiles = glob.glob('.\\vectors\\*.npz')
+    allfiles = glob.glob('.\\post_nmslib\\*.npz')
 
     t = AnnoyIndex(dims, metric='angular')
     for file_index, i in enumerate(allfiles):
@@ -102,11 +95,12 @@ def cluster():
 
         # Adds image feature vectors into annoy index
         t.add_item(file_index, file_vector)
-
         print("---------------------------------")
         print("Annoy index     : %s" % file_index)
         print("Image file name : %s" % file_name)
         print("--- %.2f minutes passed ---------" % ((time.time() - start_time) / 60))
+        # if file_index == trees:
+        #     break
     # Builds annoy index
     t.build(trees)
 
