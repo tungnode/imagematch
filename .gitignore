@@ -1,5 +1,7 @@
 /.idea
 /.vs
 /images
-/vectors
+/vectors*
+/matched*
+/post*
 /matched*
