@@ -47,8 +47,8 @@ def load_glob_worker(all_files,file_name_index,data_set,start,end,lock):
 
 def is_legit_token(master_file_name,neighbor_file_name):
     try:
-        master_token = master_file_name.split("_")[0]
-        neighbor_token = neighbor_file_name.split("_")[0]
+        master_token = master_file_name.split("_")[1]
+        neighbor_token = neighbor_file_name.split("_")[1]
         master_token_owners = map_of_token_with_owners.get(master_token)
         neighbor_token_owners = map_of_token_with_owners.get(neighbor_token)
 
@@ -125,6 +125,7 @@ neighbor_master_set = {}
 if __name__ == '__main__':
     # load image vector files
     all_files = glob.glob('.\\vectors\\*.npz')
+
     total_files = len(all_files)
     print(total_files)
     lock = multiprocessing.Lock()
@@ -158,13 +159,14 @@ if __name__ == '__main__':
 
     # initialize a new index, using a HNSW index on Cosine Similarity
     index = nmslib.init(method='hnsw', space='cosinesimil')
+    
     index.addDataPointBatch(data_set)
     index.createIndex({'post': 2,'efConstruction':1000,'M':50,}, print_progress=True)
     # index.createIndex({'numPivot':5000,'numPivotIndex':5000})
     print(index)
     # query for the nearest neighbours of the first datapoint
     # ids, distances = index.knnQuery(data_set, k=10)
-    
+    index.saveIndex(".\\nmslib_index_test",True)
    
     # get all nearest neighbours for all the datapoint
     # using a pool of 4 threads to compute
