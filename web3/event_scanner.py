@@ -51,7 +51,7 @@ class EventScannerState(ABC):
         """
 
     @abstractmethod
-    def process_event(self, block_when: datetime.datetime, event: AttributeDict) -> object:
+    def process_event(self, web3: Web3, block_when: datetime.datetime, event: AttributeDict) -> object:
         """Process incoming events.
 
         This function takes raw events from Web3, transforms them to your application internal
@@ -211,7 +211,7 @@ class EventScanner:
                 block_when = get_block_when(block_number)
 
                 logger.debug("Processing event %s, block:%d count:%d", evt["event"], evt["blockNumber"])
-                processed = self.state.process_event(block_when, evt)
+                processed = self.state.process_event(self.web3,block_when, evt)
                 all_processed.append(processed)
 
         end_block_timestamp = get_block_when(end_block)
@@ -509,8 +509,36 @@ if __name__ == "__main__":
             # Save the database file for every minute
             if time.time() - self.last_save > 60:
                 self.save()
-
-        def process_event(self, block_when: datetime.datetime, event: AttributeDict) -> str:
+        
+        def get_token_uri(self, web3, contract_address, token_id):
+            simplified_abi = [{
+                "constant": True,
+                "inputs": [
+                    {
+                        "internalType": "uint256",
+                        "name": "tokenId",
+                        "type": "uint256"
+                    }
+                ],
+                "name": "tokenURI",
+                "outputs": [
+                    {
+                        "internalType": "string",
+                        "name": "",
+                        "type": "string"
+                    }
+                ],
+                "payable": False,
+                "stateMutability": "view",
+                "type": "function"
+            }]
+            ck_contract = web3.eth.contract(address=web3.toChecksumAddress(contract_address), abi=simplified_abi)
+            uri = ck_contract.functions.tokenURI(token_id).call()
+            print(uri)
+            return uri
+            
+            
+        def process_event(self, web3: Web3, block_when: datetime.datetime, event: AttributeDict) -> str:
             """Record a ERC-20 transfer in our database."""
             # Events are keyed by their transaction hash and log index
             # One transaction may contain multiple events
@@ -530,6 +558,7 @@ if __name__ == "__main__":
                 "tokenId": args.tokenId,
                 "timestamp": block_when.isoformat(),
             }
+            uri = self.get_token_uri(web3,event['address'],args.tokenId)
             print(transfer)
             # Create empty dict as the block that contains all transactions by txhash
             if block_number not in self.state["blocks"]:
