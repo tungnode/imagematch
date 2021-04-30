@@ -5,6 +5,9 @@ import json
 import datetime
 import time
 from web3.datastructures import AttributeDict 
+import requests
+from queue import Queue
+
 class JSONifiedState(EventScannerState):
         """Store the state of scanned blocks and all events.
 
@@ -14,9 +17,16 @@ class JSONifiedState(EventScannerState):
 
         def __init__(self):
             self.state = None
+            self.address_token_owners = {}
+            self.tokens_file_name = "addresses_tokens_owners_data.json"
             self.fname = "test-state.json"
             # How many second ago we saved the JSON file
             self.last_save = 0
+            self.gateway_queue = Queue(maxsize=5)
+            self.gateway_queue.put('https://ipfs.io/')
+            self.gateway_queue.put('https://gateway.ipfs.io/')
+            self.gateway_queue.put('https://ipfs.drink.cafe/')
+            self.gateway_queue.put('https://dweb.link/')
 
         def reset(self):
             """Create initial state of nothing scanned."""
@@ -33,12 +43,22 @@ class JSONifiedState(EventScannerState):
             except (IOError, json.decoder.JSONDecodeError):
                 print("State starting from scratch")
                 self.reset()
+            
+            try:
+                self.address_token_owners = json.load(open(self.tokens_file_name),rt)
+                print("Loaded address_token_owners")
+            except Exception as e:
+                print(e)    
 
         def save(self):
             """Save everything we have scanned so far in a file."""
             with open(self.fname, "wt") as f:
                 json.dump(self.state, f)
             self.last_save = time.time()
+
+            with open(self.tokens_file_name, "wt") as fw:
+                json.dump(self.address_token_owners, fw)
+
 
         #
         # EventScannerState methods implemented below
@@ -67,6 +87,7 @@ class JSONifiedState(EventScannerState):
                 self.save()
         
         def get_token_uri(self, web3, contract_address, token_id):
+            gateway = self.gateway_queue.get()
             try:
                 simplified_abi = [{
                     "constant": True,
@@ -90,13 +111,30 @@ class JSONifiedState(EventScannerState):
                     "type": "function"
                 }]
                 contract = web3.eth.contract(address=web3.toChecksumAddress(contract_address), abi=simplified_abi)
-                uri = contract.functions.tokenURI(token_id).call()
-                return uri
+                img_uri = contract.functions.tokenURI(token_id).call()
+                token_uri = img_uri
+                if img_uri != None and img_uri != '':
+                    if img_uri.startswith('http') == False:
+                        
+                        img_uri = gateway+img_uri[img_uri.rindex('ipfs'):]
+                    json_response = requests.get(img_uri, stream = True)
+                    img_uri = json_response.json()['image']
+                return token_uri,img_uri
             except Exception as e:
                 print(e)
-                return None
+                return None,None
+            finally:
+                self.gateway_queue.put(gateway)    
                         
-        
+        def add_owners_to_state(self,address_token,owners,token_uri,img_uri):
+            existing_owners = self.address_token_owners.get(address_token)
+            if existing_owners == None:
+                existing_owners = {}
+            existing_owners[owners['from']] = owners['from']
+            existing_owners[owners['to']] = owners['to']
+            existing_owners['token_uri'] = token_uri
+            existing_owners['img_uri'] = img_uri
+            self.address_token_owners[address_token] = existing_owners
     
             
         def process_event(self, web3: Web3, block_when: datetime.datetime, event: AttributeDict) -> str:
@@ -119,8 +157,9 @@ class JSONifiedState(EventScannerState):
                 "tokenId": args.tokenId,
                 "timestamp": block_when.isoformat(),
             }
-            uri = self.get_token_uri(web3,event['address'],args.tokenId)
-            
+            token_uri,img_uri = self.get_token_uri(web3,event['address'],args.tokenId)
+            address_token = event['address']+str(args.tokenId)
+            self.add_owners_to_state(address_token,transfer,token_uri,img_uri)
             print(transfer)
             # Create empty dict as the block that contains all transactions by txhash
             if block_number not in self.state["blocks"]:
@@ -137,4 +176,4 @@ class JSONifiedState(EventScannerState):
             self.state["blocks"][block_number][txhash][log_index] = args.tokenId
 
             # Return a pointer that allows us to look up this event later if needed
-            return event['address']+str(args.tokenId),uri, f"{block_number}-{txhash}-{log_index}"
+            return address_token,img_uri, f"{block_number}-{txhash}-{log_index}"

@@ -24,15 +24,12 @@ from queue import Queue
 
 
 def download_image(gateway,file_name,url):
-    if url != None and url != '':
         if url.startswith('http') == False:
+            dot_location =  url.find(".")
+            file_type = url[dot_location:] if dot_location > 0 else ""
             url = gateway+url[url.rindex('ipfs'):]
-        json_response = requests.get(url, stream = True)
-        image_ipfs_url = json_response.json()['image']
-        dot_location =  image_ipfs_url.find(".")
-        file_type = image_ipfs_url[dot_location:] if dot_location > 0 else ""
-        image_http_url = gateway+image_ipfs_url[image_ipfs_url.rindex('ipfs'):]
-        image_response = requests.get(image_http_url,stream = True)
+        
+        image_response = requests.get(url,stream = True)
         
         if image_response.status_code == 200:
             # Set decode_content value to True, otherwise the downloaded image file's size will be zero.
@@ -80,7 +77,10 @@ def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_
             # download_image(gateway,file_name,url)
             img_file_paths_queue.put(download_image(gateway,file_name,url))
         except Exception as e:
-            print(e)    
+            print(e)
+            # put it back so it will be handle by other gateways
+            # TODO: need to check specific error
+            img_urls_queue.put((file_name,url))    
             continue
         finally:
             gateway_queue.put(gateway)
