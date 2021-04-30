@@ -19,19 +19,19 @@ from web3.contract import Contract
 from web3.datastructures import AttributeDict
 from web3.exceptions import BlockNotFound
 from eth_abi.codec import ABICodec
+from queue import Queue
 
 
 
-
-def download_image(file_name,url):
+def download_image(gateway,file_name,url):
     if url != None and url != '':
         if url.startswith('http') == False:
-            url = 'https://ipfs.io/'+url[url.rindex('ipfs'):]
+            url = gateway+url[url.rindex('ipfs'):]
         json_response = requests.get(url, stream = True)
         image_ipfs_url = json_response.json()['image']
         dot_location =  image_ipfs_url.find(".")
         file_type = image_ipfs_url[dot_location:] if dot_location > 0 else ""
-        image_http_url = "https://ipfs.io/"+image_ipfs_url[image_ipfs_url.rindex('ipfs'):]
+        image_http_url = gateway+image_ipfs_url[image_ipfs_url.rindex('ipfs'):]
         image_response = requests.get(image_http_url,stream = True)
         
         if image_response.status_code == 200:
@@ -66,16 +66,24 @@ def vectorized_image(image_name,image_content,tfhub_module):
             # Saves the 'feature_set' to a text file
             np.savetxt(out_path, feature_set, delimiter=',')
 def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_queue:multiprocessing.Queue):
+    gateway_queue = Queue(maxsize=5)
+    gateway_queue.put('https://ipfs.io/')
+    gateway_queue.put('https://gateway.ipfs.io/')
+    gateway_queue.put('https://ipfs.drink.cafe/')
+    gateway_queue.put('https://dweb.link/')
+    
     while True:
         try:
-
+            gateway = gateway_queue.get()
             file_name,url = img_urls_queue.get()
             print("################### downloading",url)
-            download_image(file_name,url)
-            img_file_paths_queue.put(download_image(file_name,url))
+            # download_image(gateway,file_name,url)
+            img_file_paths_queue.put(download_image(gateway,file_name,url))
         except Exception as e:
             print(e)    
             continue
+        finally:
+            gateway_queue.put(gateway)
 
 def img_processing_worker(img_file_paths_queue:multiprocessing.Queue):
     # Definition of module with using tfhub.dev

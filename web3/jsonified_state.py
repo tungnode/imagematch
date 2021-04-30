@@ -111,7 +111,7 @@ class JSONifiedState(EventScannerState):
             txhash = event.transactionHash.hex()  # Transaction hash
             block_number = event.blockNumber
 
-            # Convert ERC-20 Transfer event to our internal format
+            # Convert ERC-721 Transfer event to internal format
             args = event["args"]
             transfer = {
                 "from": args["from"],
@@ -133,8 +133,8 @@ class JSONifiedState(EventScannerState):
                 # Create a tx entry that contains all events by a log index
                 self.state["blocks"][block_number][txhash] = {}
 
-            # Record ERC-20 transfer in our database
-            self.state["blocks"][block_number][txhash][log_index] = transfer
+            # Record ERC-721 transfer in our database
+            self.state["blocks"][block_number][txhash][log_index] = args.tokenId
 
             # Return a pointer that allows us to look up this event later if needed
             return event['address']+str(args.tokenId),uri, f"{block_number}-{txhash}-{log_index}"
