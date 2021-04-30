@@ -431,7 +431,8 @@ def download_image(file_name,url):
             url = 'https://ipfs.io/'+url[url.rindex('ipfs'):]
         json_response = requests.get(url, stream = True)
         image_ipfs_url = json_response.json()['image']
-        file_type = image_ipfs_url[image_ipfs_url.rindex('.'):]
+        dot_location =  image_ipfs_url.find(".")
+        file_type = image_ipfs_url[dot_location:] if dot_location > 0 else ""
         image_http_url = "https://ipfs.io/"+image_ipfs_url[image_ipfs_url.rindex('ipfs'):]
         image_response = requests.get(image_http_url,stream = True)
         
