@@ -7,6 +7,14 @@ where events are added wherever the scanner left off.
 import datetime
 import time
 import logging
+import requests
+import shutil
+import json
+import tensorflow as tf
+import tensorflow_hub as hub
+import numpy as np
+import os.path
+import multiprocessing
 from abc import ABC, abstractmethod
 from typing import Tuple, Optional, Callable, List, Iterable
 
@@ -83,7 +91,7 @@ class EventScanner:
     because it cannot correctly throttle and decrease the `eth_getLogs` block number range.
     """
 
-    def __init__(self, web3: Web3, contract: Contract, state: EventScannerState, events: List, filters: {},
+    def __init__(self, img_urls_queue:multiprocessing.Queue, web3: Web3, contract: Contract, state: EventScannerState, events: List, filters: {},
                  max_chunk_scan_size: int = 10000, max_request_retries: int = 30, request_retry_seconds: float = 3.0):
         """
         :param contract: Contract
@@ -93,7 +101,7 @@ class EventScanner:
         :param max_request_retries: How many times we try to reattempt a failed JSON-RPC call
         :param request_retry_seconds: Delay between failed requests to let JSON-RPC server to recover
         """
-
+        self.img_urls_queue = img_urls_queue
         self.logger = logger
         self.contract = contract
         self.web3 = web3
@@ -211,7 +219,9 @@ class EventScanner:
                 block_when = get_block_when(block_number)
 
                 logger.debug("Processing event %s, block:%d count:%d", evt["event"], evt["blockNumber"])
-                processed = self.state.process_event(self.web3,block_when, evt)
+                file_name,ipfs_url,processed = self.state.process_event(self.web3,block_when, evt)
+                if ipfs_url != None:
+                    self.img_urls_queue.put((file_name,ipfs_url))
                 all_processed.append(processed)
 
         end_block_timestamp = get_block_when(end_block)
@@ -415,6 +425,71 @@ def _fetch_events_for_all_contracts(
         all_events.append(evt)
     return all_events
 
+def download_image(file_name,url):
+    if url != None and url != '':
+        if url.startswith('http') == False:
+            url = 'https://ipfs.io/'+url[url.rindex('ipfs'):]
+        json_response = requests.get(url, stream = True)
+        image_ipfs_url = json_response.json()['image']
+        file_type = image_ipfs_url[image_ipfs_url.rindex('.'):]
+        image_http_url = "https://ipfs.io/"+image_ipfs_url[image_ipfs_url.rindex('ipfs'):]
+        image_response = requests.get(image_http_url,stream = True)
+        
+        if image_response.status_code == 200:
+            # Set decode_content value to True, otherwise the downloaded image file's size will be zero.
+            image_response.raw.decode_content = True
+            
+            # Open a local file with wb ( write binary ) permission.
+            # with open("test_image"+file_type,'wb') as f:
+            #     shutil.copyfileobj(image_response.raw, f)
+            return file_name+file_type, image_response.content
+def vectorized_image(image_name,image_content,tfhub_module):
+            decoded_img = tf.io.decode_image(image_content,channels=3,expand_animations=False)
+             # Resizes the image to 224 x 224 x 3 shape tensor
+            decoded_img = tf.image.resize_with_pad(decoded_img, 224, 224)
+            # Converts the data type of uint8 to float32 by adding a new axis
+            # img becomes 1 x 224 x 224 x 3 tensor with data type of float32
+            # This is required for the mobilenet model we are using
+            decoded_img = tf.image.convert_image_dtype(decoded_img, tf.float32)[tf.newaxis, ...]
+
+            
+            features = tfhub_module(decoded_img)
+            # Remove single-dimensional entries from the 'features' array
+            feature_set = np.squeeze(features)
+           
+
+            # Saves the image feature vectors into a file for later use
+            outfile_name = os.path.basename(image_name) + ".npz"
+
+            out_path = os.path.join('.\\vectors_test\\', outfile_name)
+            # Saves the 'feature_set' to a text file
+            np.savetxt(out_path, feature_set, delimiter=',')
+def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_queue:multiprocessing.Queue):
+    while True:
+        try:
+
+            file_name,url = img_urls_queue.get()
+            print("################### downloading",url)
+            download_image(file_name,url)
+            img_file_paths_queue.put(download_image(file_name,url))
+        except Exception as e:
+            print(e)    
+            continue
+
+def img_processing_worker(img_file_paths_queue:multiprocessing.Queue):
+    # Definition of module with using tfhub.dev
+    module_handle = "https://tfhub.dev/google/imagenet/mobilenet_v2_140_224/feature_vector/4"
+    # Loads the module
+    tfhub_module = hub.load(module_handle)
+    while True:
+        try:
+
+            file_name,img_content = img_file_paths_queue.get()
+            print("================== processing",file_name)
+            vectorized_image(file_name,img_content,tfhub_module)
+        except Exception as e:
+            print(e)
+            continue
 
 if __name__ == "__main__":
     # Simple demo that scans all the token transfers of RCC token (11k).
@@ -433,8 +508,8 @@ if __name__ == "__main__":
 
     # RCC has around 11k Transfer events
     # https://etherscan.io/token/0x9b6443b0fb9c241a7fdac375595cea13e6b7807a
-    # RCC_ADDRESS = Web3.toChecksumAddress("0x60f80121c31a0d46b5279700f9df786054aa5ee5")
-    RCC_ADDRESS = Web3.toChecksumAddress("0x9C008A22D71B6182029b694B0311486e4C0e53DB")
+    RCC_ADDRESS = Web3.toChecksumAddress("0x60f80121c31a0d46b5279700f9df786054aa5ee5")
+    # RCC_ADDRESS = Web3.toChecksumAddress("0x9C008A22D71B6182029b694B0311486e4C0e53DB")
 
     # Reduced ERC-20 ABI, only Transfer event
     ABI = """[
@@ -511,32 +586,37 @@ if __name__ == "__main__":
                 self.save()
         
         def get_token_uri(self, web3, contract_address, token_id):
-            simplified_abi = [{
-                "constant": True,
-                "inputs": [
-                    {
-                        "internalType": "uint256",
-                        "name": "tokenId",
-                        "type": "uint256"
-                    }
-                ],
-                "name": "tokenURI",
-                "outputs": [
-                    {
-                        "internalType": "string",
-                        "name": "",
-                        "type": "string"
-                    }
-                ],
-                "payable": False,
-                "stateMutability": "view",
-                "type": "function"
-            }]
-            ck_contract = web3.eth.contract(address=web3.toChecksumAddress(contract_address), abi=simplified_abi)
-            uri = ck_contract.functions.tokenURI(token_id).call()
-            print(uri)
-            return uri
-            
+            try:
+                simplified_abi = [{
+                    "constant": True,
+                    "inputs": [
+                        {
+                            "internalType": "uint256",
+                            "name": "tokenId",
+                            "type": "uint256"
+                        }
+                    ],
+                    "name": "tokenURI",
+                    "outputs": [
+                        {
+                            "internalType": "string",
+                            "name": "",
+                            "type": "string"
+                        }
+                    ],
+                    "payable": False,
+                    "stateMutability": "view",
+                    "type": "function"
+                }]
+                contract = web3.eth.contract(address=web3.toChecksumAddress(contract_address), abi=simplified_abi)
+                uri = contract.functions.tokenURI(token_id).call()
+                return uri
+            except Exception as e:
+                print(e)
+                return None
+                        
+        
+    
             
         def process_event(self, web3: Web3, block_when: datetime.datetime, event: AttributeDict) -> str:
             """Record a ERC-20 transfer in our database."""
@@ -559,6 +639,7 @@ if __name__ == "__main__":
                 "timestamp": block_when.isoformat(),
             }
             uri = self.get_token_uri(web3,event['address'],args.tokenId)
+            
             print(transfer)
             # Create empty dict as the block that contains all transactions by txhash
             if block_number not in self.state["blocks"]:
@@ -575,7 +656,7 @@ if __name__ == "__main__":
             self.state["blocks"][block_number][txhash][log_index] = transfer
 
             # Return a pointer that allows us to look up this event later if needed
-            return f"{block_number}-{txhash}-{log_index}"
+            return event['address']+str(args.tokenId),uri, f"{block_number}-{txhash}-{log_index}"
 
     def run():
 
@@ -605,9 +686,15 @@ if __name__ == "__main__":
         # Restore/create our persistent state
         state = JSONifiedState()
         state.restore()
-
+        img_urls_queue = multiprocessing.Queue(maxsize=10)
+        img_file_paths_queue = multiprocessing.Queue(maxsize=10)
+        download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue))
+        processing_worker = multiprocessing.Process(target=img_processing_worker,args=(img_file_paths_queue,))
+        download_worker.start()
+        processing_worker.start()
         # chain_id: int, web3: Web3, abi: dict, state: EventScannerState, events: List, filters: {}, max_chunk_scan_size: int=10000
         scanner = EventScanner(
+            img_urls_queue=img_urls_queue,
             web3=web3,
             contract=ERC721,
             state=state,
@@ -650,6 +737,8 @@ if __name__ == "__main__":
             result, total_chunks_scanned = scanner.scan(start_block, end_block, progress_callback=_update_progress)
 
         state.save()
+        download_worker.join()
+        processing_worker.join()
         duration = time.time() - start
         print(f"Scanned total {len(result)} Transfer events, in {duration} seconds, total {total_chunks_scanned} chunk scans performed")
 
