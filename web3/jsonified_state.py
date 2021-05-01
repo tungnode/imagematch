@@ -7,7 +7,7 @@ import time
 from web3.datastructures import AttributeDict 
 import requests
 from queue import Queue
-
+from os import path
 class JSONifiedState(EventScannerState):
         """Store the state of scanned blocks and all events.
 
@@ -130,13 +130,25 @@ class JSONifiedState(EventScannerState):
             existing_owners = self.address_token_owners.get(address_token)
             if existing_owners == None:
                 existing_owners = {}
-            existing_owners[owners['from']] = owners['from']
-            existing_owners[owners['to']] = owners['to']
-            existing_owners['token_uri'] = token_uri
-            existing_owners['img_uri'] = img_uri
+            if "0x0000000000000000000000000000000000000000" != owners['from']:    
+                existing_owners[owners['from']] = owners['from']
+            if "0x0000000000000000000000000000000000000000" != owners['to']:    
+                existing_owners[owners['to']] = owners['to']
+            if token_uri is not None:
+                existing_owners['token_uri'] = token_uri
+            if img_uri is not None:    
+                existing_owners['img_uri'] = img_uri
             self.address_token_owners[address_token] = existing_owners
     
-            
+        def is_vector_feature_exist(self,address_token):
+            if (path.exists(address_token+".jpeg.npz") or path.exists(address_token+".png.npz") 
+                or path.exists(address_token+".jpg.npz") or path.exists(address_token+".gif.npz")
+                or path.exists(address_token+".npz")):
+                return True
+            else:
+                return False    
+
+
         def process_event(self, web3: Web3, block_when: datetime.datetime, event: AttributeDict) -> str:
             """Record a ERC-20 transfer in our database."""
             # Events are keyed by their transaction hash and log index
@@ -157,8 +169,11 @@ class JSONifiedState(EventScannerState):
                 "tokenId": args.tokenId,
                 "timestamp": block_when.isoformat(),
             }
-            token_uri,img_uri = self.get_token_uri(web3,event['address'],args.tokenId)
-            address_token = event['address']+str(args.tokenId)
+            address_token = event['address']+"_"+str(args.tokenId)
+            token_uri = None
+            img_uri = None
+            if self.is_vector_feature_exist(address_token) == False:
+                token_uri,img_uri = self.get_token_uri(web3,event['address'],args.tokenId)
             self.add_owners_to_state(address_token,transfer,token_uri,img_uri)
             print(transfer)
             # Create empty dict as the block that contains all transactions by txhash
