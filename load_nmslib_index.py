@@ -15,9 +15,16 @@ import os.path
 import logging
 from annoy import AnnoyIndex
 import hnswlib
+from json import JSONEncoder
+from os import path
+
 logging.basicConfig(level=logging.DEBUG)
 
-
+class NumpyArrayEncoder(JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, numpy.ndarray):
+            return obj.tolist()
+        return JSONEncoder.default(self, obj)
 def load_glob_worker(files,file_name_index,image_vector_features,start,end,lock):
     # all_files = glob.glob('.\\vectors_test\\*.npz')
     n = random.randint(3,10)
@@ -25,27 +32,8 @@ def load_glob_worker(files,file_name_index,image_vector_features,start,end,lock)
     for index in range(start,end):
         image_vector_features.append(np.loadtxt(files[index]))
         # file_name = os.path.basename(all_files[index]).split('.')[0]
-        file_name_index[index] = files[index]
-    #     if n > 0:
-    #         vector_data.append(np.loadtxt(all_files[index]))
-    #         n -= 1
-    #     else:    
-    #         lock.acquire()
-    #         data_set.extend(vector_data)
-    #         lock.release()
-    #         n = random.randint(1,10)
-    #         vector_data.clear()
-    # if len(vector_data) != 0:
-    #     lock.acquire()
-    #     data_set = data_set + vector_data
-    #     lock.release()
+        file_name_index[str(index)] = files[index]
 
-# def load_glob(all_vectors_data_set,file_index,start,end,lock):
-#     all_files = glob.glob('.\\vectors_test_data\\*.npz')
-#     vector_data = []
-#     for index in range(start,end):
-#         file_index[index] = all_files[index]
-#         all_vectors_data_set.append(np.loadtxt(all_files[index]))
 
 def is_legit_token(master_file_name,neighbor_file_name):
     try:
@@ -127,73 +115,65 @@ neighbor_master_set = {}
 dims = 1792
 if __name__ == '__main__':
     # load image vector files
-    all_files = glob.glob('.\\vectors\\*.npz')
-    total_files = len(all_files)
-    print(total_files)
+    
     lock = multiprocessing.Lock()
-    # multiprocessing.Array('i', 4)
-    data_set = []# manager.list()
-    file_name_index = {}#manager.dict()
+    
+    data_set = []
+    file_name_index = {}
     start_time = time.time()
     
-    
- 
-    # number_of_processes = 5
-    # processes_list = []
-    # item_per_process = int(total_files/number_of_processes)
-
-    # for p in range(number_of_processes):
-    #     processes_list.append(multiprocessing.Process(target=load_glob_worker, args=(all_files,file_name_index,data_set,p*item_per_process,p*item_per_process+item_per_process,lock)))
-
-    # for p1 in range(number_of_processes):
-    #     processes_list[p1].start()
-
-    # for p2 in range(number_of_processes):
-    #     processes_list[p2].join()
-    load_glob_worker(all_files,file_name_index,data_set,0,total_files,lock)
+    vector_features_file_path = "vectors_features.json"
+    vector_index_file_names_path = "index_file_names.json"
+    if path.exists(vector_features_file_path):
+        with open(vector_features_file_path, "r") as read_file:
+            data_set = numpy.asarray(json.load(read_file)['data'])
+        with open(vector_index_file_names_path, "r") as read_file:
+            file_name_index = json.load(read_file)
+        # file_name_index = json.loads(vector_index_file_names_path)
+    else:
+        all_files = glob.glob('.\\vectors\\*.npz')
+        total_files = len(all_files)
+        print(total_files)
+        load_glob_worker(all_files,file_name_index,data_set,0,total_files,lock)
+        with open(vector_features_file_path, 'w') as out:
+            json.dump({'data':data_set},  out,cls=NumpyArrayEncoder,)
+        with open(vector_index_file_names_path, 'w') as out:
+            json.dump(file_name_index,  out)
     print("======================",len(data_set))
-    # data_set = []
-    # file_indexes = {}
-    # load_glob(data_set,file_indexes,0,total_files,lock)
-
-    # create a random matrix to index
-    # data = numpy.random.randn(100000, 100).astype(numpy.float32)
-
-    # initialize a new index, using a HNSW index on Cosine Similarity
-
-    # index = nmslib.init(method='hnsw', space='cosinesimil')
-    # index.loadIndex(".\\nmslib_index_test",True)
-    # index.addDataPointBatch(data_set)
-
+    total_files = len(data_set)
+    index_file_path = 'hnswlib.bin'
     index = hnswlib.Index(space='cosine', dim=dims) # possible options are l2, cosine or ip
-    index.init_index(max_elements = total_files,ef_construction = 2000, M = 16)
-    index_path='first_half.bin'
-    index.add_items(data_set)
-    index.set_ef(50)
-    index.save_index(index_path)
-    del index
+    if path.exists(index_file_path) == False:
+        index.init_index(max_elements = total_files,ef_construction = 2000, M = 16)
+        index.add_items(data_set)
+        index.set_ef(50)
+        index.save_index(index_file_path)
+    else:
+        index.load_index(index_file_path,max_elements = len(data_set))
+            
+    
+    # del index
 
-    second_data_set_files = glob.glob('.\\vectors_gif_2\\*.npz')
-    second_data_set = []
-    second_file_name_index = {}
-    load_glob_worker(second_data_set_files,second_file_name_index,second_data_set,0,len(second_data_set_files),lock)
-    for new_feature_index,new_file_feature in enumerate(second_data_set):
-        data_set.append(new_file_feature)
-        file_name_index[total_files+new_feature_index] = second_file_name_index[new_feature_index]
+    # second_data_set_files = glob.glob('.\\vectors_gif_2\\*.npz')
+    # second_data_set = []
+    # second_file_name_index = {}
+    # load_glob_worker(second_data_set_files,second_file_name_index,second_data_set,0,len(second_data_set_files),lock)
+    # for new_feature_index,new_file_feature in enumerate(second_data_set):
+    #     data_set.append(new_file_feature)
+    #     file_name_index[total_files+new_feature_index] = second_file_name_index[new_feature_index]
 
    
-    index = hnswlib.Index(space='cosine', dim=dims) # possible options are l2, cosine or ip
-    index.load_index(index_path,max_elements = len(data_set))
+    # index = hnswlib.Index(space='cosine', dim=dims) # possible options are l2, cosine or ip
+    # index.load_index(index_path,max_elements = len(data_set))
+    # index.add_items(second_data_set)
 
-    
-    index.add_items(second_data_set)
     # labels, distances = p.knn_query(data_set, k = 5)
     # index.createIndex({'post': 2,'efConstruction':1000,'M':50,}, print_progress=True)
     # index.createIndex({'numPivot':5000,'numPivotIndex':5000})
     print(index)
-    # query for the nearest neighbours of the first datapoint
-    # ids, distances = index.knnQuery(data_set, k=10)
-    index.save_index(index_path)
+ 
+
+    
    
     # get all nearest neighbours for all the datapoint
     # using a pool of 4 threads to compute
@@ -211,15 +191,11 @@ if __name__ == '__main__':
             # master_neighbors_distances = master[1]
             # if index_of_distance_to_neighbor != 0:
             if distance_to_neighbor <= 0.02:
-                master_file_path = file_name_index[master_index]
+                master_file_path = file_name_index[str(master_index)]
                 neighbor_index = labels[master_index][index_of_distance_to_neighbor]
-                neighbor_file_path = file_name_index[neighbor_index]
+                neighbor_file_path = file_name_index[str(neighbor_index)]
                 if( master_file_path != neighbor_file_path):
-                # similarity = 1 - spatial.distance.cosine(data_set[master_index], data_set[neighbor_index])
-                # rounded_similarity = int((similarity * 10000)) / 10000.0
-                # if((rounded_similarity >= 0.99) 
-                #     and (is_legit_token(master_file_path,neighbor_file_path,map_of_token_with_owners) == False)
-                #     and (is_already_exist(master_file_path,neighbor_file_path,neighbor_master_map) == False)):
+               
                     named_nearest_neighbors.append({
                                 # 'spatial_similarity': str(rounded_similarity),
                                 'nmslib_similarity': str(distance_to_neighbor),
