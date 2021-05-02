@@ -22,6 +22,7 @@ from eth_abi.codec import ABICodec
 from queue import Queue
 import hnswlib
 from json import JSONEncoder
+from constants import resources_folder
 
 class NumpyArrayEncoder(JSONEncoder):
     def default(self, obj):
@@ -66,7 +67,7 @@ def vectorized_image(image_name,image_content,tfhub_module):
             # Saves the image feature vectors into a file for later use
             outfile_name = os.path.basename(image_name) + ".npz"
 
-            out_path = os.path.join(resouces_folder+'.\\vectors\\', outfile_name)
+            out_path = os.path.join(resources_folder+'.\\vectors\\', outfile_name)
             # Saves the 'feature_set' to a text file
             np.savetxt(out_path, feature_set, delimiter=',')
             return feature_set
@@ -124,9 +125,9 @@ def vectors_indexing_worker(vector_feature_queue:multiprocessing.Queue):
     start_time = time.time()
     dims = 1792
     
-    vector_features_file_path = resouces_folder+"vectors_features.json"
-    vector_index_file_names_path = resouces_folder+"index_file_names.json"
-    index_file_path = resouces_folder+'hnswlib.bin'
+    vector_features_file_path = resources_folder+"vectors_features.json"
+    vector_index_file_names_path = resources_folder+"index_file_names.json"
+    index_file_path = resources_folder+'hnswlib.bin'
 
     if os.path.exists(vector_features_file_path):
         with open(vector_features_file_path, "r") as read_file:
@@ -155,7 +156,7 @@ def vectors_indexing_worker(vector_feature_queue:multiprocessing.Queue):
             index.resize_index(index.get_max_elements()+1)
             index.add_items([features_set])
             data_set.append(features_set)
-            file_name_index[str(len(data_set)-1)] = resouces_folder + "vectors\\"+file_name
+            file_name_index[str(len(data_set)-1)] = resources_folder + "vectors\\"+file_name
             if counter == 1:
                 index.save_index(index_file_path)
                 with open(vector_features_file_path, 'w') as out:
@@ -170,7 +171,6 @@ def vectors_indexing_worker(vector_feature_queue:multiprocessing.Queue):
             continue
     print("Finished indexing images")
 
-resouces_folder = '.\\test_data\\'
 if __name__ == "__main__":
     
     import sys

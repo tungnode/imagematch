@@ -8,6 +8,7 @@ from web3.datastructures import AttributeDict
 import requests
 from queue import Queue
 from os import path
+from constants import resources_folder
 class JSONifiedState(EventScannerState):
         """Store the state of scanned blocks and all events.
 
@@ -16,11 +17,11 @@ class JSONifiedState(EventScannerState):
         """
 
         def __init__(self):
-            self.resources_folder = '.\\test_data\\'
+            # self.resources_folder = resouces_folder
             self.state = None
             self.address_token_owners = {}
-            self.tokens_file_name = self.resources_folder+"addresses_tokens_owners_data.json"
-            self.fname = self.resources_folder+"test-state.json"
+            self.tokens_file_name = resources_folder+"addresses_tokens_owners_data.json"
+            self.fname = resources_folder+"test-state.json"
             # How many second ago we saved the JSON file
             self.last_save = 0
             self.gateway_queue = Queue(maxsize=5)
@@ -142,7 +143,7 @@ class JSONifiedState(EventScannerState):
             self.address_token_owners[address_token] = existing_owners
     
         def is_vector_feature_exist(self,address_token):
-            address_token = self.resources_folder+"vectors\\"+address_token
+            address_token = resources_folder+"vectors\\"+address_token
             if (path.exists(address_token+".jpeg.npz") or path.exists(address_token+".png.npz") 
                 or path.exists(address_token+".jpg.npz") or path.exists(address_token+".gif.npz")
                 or path.exists(address_token+".npz")):
