@@ -23,6 +23,7 @@ from queue import Queue
 import hnswlib
 from json import JSONEncoder
 from constants import resources_folder
+import time
 
 class NumpyArrayEncoder(JSONEncoder):
     def default(self, obj):
@@ -89,10 +90,11 @@ def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_
             # download_image(gateway,file_name,url)
             img_file_paths_queue.put(download_image(gateway,file_name,url))
         except Exception as e:
-            print(e)
+            print("Exception while downloading image:",e)
             # put it back so it will be handle by other gateways
             # TODO: need to check specific error
-            img_urls_queue.put((file_name,url))    
+            img_urls_queue.put((file_name,url))
+            time.sleep(10)    
             continue
         finally:
             gateway_queue.put(gateway)
@@ -114,7 +116,7 @@ def img_processing_worker(img_file_paths_queue:multiprocessing.Queue,vector_feat
             features_set = vectorized_image(file_name,img_content,tfhub_module)
             vector_feature_queue.put((file_name,features_set))
         except Exception as e:
-            print(e)
+            print("Exception while processing image:",e)
             continue
     print("Finished processing images")
 
@@ -153,6 +155,7 @@ def vectors_indexing_worker(vector_feature_queue:multiprocessing.Queue):
             file_name,features_set = vector_feature_queue.get()
             if file_name is None and features_set is None:
                 break
+            print("---------------------- indexing",file_name)
             index.resize_index(index.get_max_elements()+1)
             index.add_items([features_set])
             data_set.append(features_set)
@@ -167,7 +170,7 @@ def vectors_indexing_worker(vector_feature_queue:multiprocessing.Queue):
             else:
                 counter += 1
         except Exception as e:
-            print(e)    
+            print("Exception while indexing image",e)    
             continue
     print("Finished indexing images")
 
@@ -249,7 +252,7 @@ if __name__ == "__main__":
             # How many maximum blocks at the time we request from JSON-RPC
             # and we are unlikely to exceed the response size limit of the JSON-RPC server
             # max_chunk_scan_size=10000
-            max_chunk_scan_size=100
+            max_chunk_scan_size=1000
         )
 
         # Assume we might have scanned the blocks all the way to the last Ethereum block

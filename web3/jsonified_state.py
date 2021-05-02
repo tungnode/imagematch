@@ -123,7 +123,7 @@ class JSONifiedState(EventScannerState):
                     img_uri = json_response.json()['image']
                 return token_uri,img_uri
             except Exception as e:
-                print(e)
+                print("Exception while getting token URI",e)
                 return None,None
             finally:
                 self.gateway_queue.put(gateway)    
@@ -178,7 +178,7 @@ class JSONifiedState(EventScannerState):
             if self.is_vector_feature_exist(address_token) == False:
                 token_uri,img_uri = self.get_token_uri(web3,event['address'],args.tokenId)
             self.add_owners_to_state(address_token,transfer,token_uri,img_uri)
-            print(transfer)
+            # print(transfer)
             # Create empty dict as the block that contains all transactions by txhash
             if block_number not in self.state["blocks"]:
                 self.state["blocks"][block_number] = {}
