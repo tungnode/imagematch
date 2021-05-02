@@ -37,8 +37,8 @@ def load_glob_worker(files,file_name_index,image_vector_features,start,end,lock)
 
 def is_legit_token(master_file_name,neighbor_file_name):
     try:
-        master_token = master_file_name.split("_")[1]
-        neighbor_token = neighbor_file_name.split("_")[1]
+        master_token = master_file_name.split(".")[0]
+        neighbor_token = neighbor_file_name.split(".")[0]
         master_token_owners = map_of_token_with_owners.get(master_token)
         neighbor_token_owners = map_of_token_with_owners.get(neighbor_token)
 
@@ -109,7 +109,7 @@ def annoy_similarity(file_index_to_file_name,file_index_to_file_vector):
 
 
 
-with open('..\\copyHunter\\scripts\\owners_data.json') as json_file:
+with open('.\\addresses_tokens_owners_data1.json') as json_file:
     map_of_token_with_owners = json.load(json_file)
 neighbor_master_set = {}
 dims = 1792
@@ -121,9 +121,14 @@ if __name__ == '__main__':
     data_set = []
     file_name_index = {}
     start_time = time.time()
-    
-    vector_features_file_path = "vectors_features.json"
-    vector_index_file_names_path = "index_file_names.json"
+
+
+    resouces_folder = '.\\test_data\\'
+    vector_features_file_path = resouces_folder+"vectors_features.json"
+    vector_index_file_names_path = resouces_folder+"index_file_names.json"
+    index_file_path = resouces_folder+'hnswlib.bin'
+    vectors_folder = resouces_folder+"vectors\\*.npz"
+    nearest_neighbors_file_path = resouces_folder+'nearest_neighbors.json'
     if path.exists(vector_features_file_path):
         with open(vector_features_file_path, "r") as read_file:
             data_set = numpy.asarray(json.load(read_file)['data'])
@@ -131,7 +136,7 @@ if __name__ == '__main__':
             file_name_index = json.load(read_file)
         # file_name_index = json.loads(vector_index_file_names_path)
     else:
-        all_files = glob.glob('.\\vectors\\*.npz')
+        all_files = glob.glob(vectors_folder)
         total_files = len(all_files)
         print(total_files)
         load_glob_worker(all_files,file_name_index,data_set,0,total_files,lock)
@@ -141,7 +146,6 @@ if __name__ == '__main__':
             json.dump(file_name_index,  out)
     print("======================",len(data_set))
     total_files = len(data_set)
-    index_file_path = 'hnswlib.bin'
     index = hnswlib.Index(space='cosine', dim=dims) # possible options are l2, cosine or ip
     if path.exists(index_file_path) == False:
         index.init_index(max_elements = total_files,ef_construction = 2000, M = 16)
@@ -209,7 +213,7 @@ if __name__ == '__main__':
     annoy_nearest_neighbor = annoy_similarity(annoy_file_index_to_file_name,annoy_file_index_to_file_vector)
     print("Step.2 - Similarity score calculation - Finished ")
     # Writes the 'named_nearest_neighbors' to a json file
-    with open('nearest_neighbors.json', 'w') as out:
+    with open(nearest_neighbors_file_path, 'w') as out:
         json.dump(list(annoy_nearest_neighbor), out)
     print("Step.3 - Data stored in 'nearest_neighbors.json' file ")
     print("--- Prosess completed in %.2f minutes ---------" %
