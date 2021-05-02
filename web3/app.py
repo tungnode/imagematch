@@ -20,7 +20,14 @@ from web3.datastructures import AttributeDict
 from web3.exceptions import BlockNotFound
 from eth_abi.codec import ABICodec
 from queue import Queue
+import hnswlib
+from json import JSONEncoder
 
+class NumpyArrayEncoder(JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return JSONEncoder.default(self, obj)
 
 
 def download_image(gateway,file_name,url):
@@ -59,9 +66,10 @@ def vectorized_image(image_name,image_content,tfhub_module):
             # Saves the image feature vectors into a file for later use
             outfile_name = os.path.basename(image_name) + ".npz"
 
-            out_path = os.path.join('.\\vectors_test\\', outfile_name)
+            out_path = os.path.join(resouces_folder+'.\\vectors\\', outfile_name)
             # Saves the 'feature_set' to a text file
             np.savetxt(out_path, feature_set, delimiter=',')
+            return feature_set
 def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_queue:multiprocessing.Queue):
     gateway_queue = Queue(maxsize=5)
     gateway_queue.put('https://ipfs.io/')
@@ -73,6 +81,9 @@ def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_
         try:
             gateway = gateway_queue.get()
             file_name,url = img_urls_queue.get()
+            if file_name is None and url is None:
+                img_file_paths_queue.put((None,None))
+                break
             print("################### downloading",url)
             # download_image(gateway,file_name,url)
             img_file_paths_queue.put(download_image(gateway,file_name,url))
@@ -84,8 +95,9 @@ def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_
             continue
         finally:
             gateway_queue.put(gateway)
+    print("Finished downloading images")
 
-def img_processing_worker(img_file_paths_queue:multiprocessing.Queue):
+def img_processing_worker(img_file_paths_queue:multiprocessing.Queue,vector_feature_queue:multiprocessing.Queue):
     # Definition of module with using tfhub.dev
     module_handle = "https://tfhub.dev/google/imagenet/mobilenet_v2_140_224/feature_vector/4"
     # Loads the module
@@ -94,20 +106,73 @@ def img_processing_worker(img_file_paths_queue:multiprocessing.Queue):
         try:
 
             file_name,img_content = img_file_paths_queue.get()
+            if file_name is None and img_content is None:
+                vector_feature_queue.put((None,None))
+                break
             print("================== processing",file_name)
-            vectorized_image(file_name,img_content,tfhub_module)
+            features_set = vectorized_image(file_name,img_content,tfhub_module)
+            vector_feature_queue.put((file_name,features_set))
         except Exception as e:
             print(e)
             continue
+    print("Finished processing images")
 
 
+def vectors_indexing_worker(vector_feature_queue:multiprocessing.Queue):
+    data_set = []
+    file_name_index = {}
+    start_time = time.time()
+    dims = 1792
+    
+    vector_features_file_path = resouces_folder+"vectors_features.json"
+    vector_index_file_names_path = resouces_folder+"index_file_names.json"
+    index_file_path = resouces_folder+'hnswlib.bin'
+
+    if os.path.exists(vector_features_file_path):
+        with open(vector_features_file_path, "r") as read_file:
+            data_set = list(np.asarray(json.load(read_file)['data']))
+        with open(vector_index_file_names_path, "r") as read_file:
+            file_name_index = json.load(read_file)
+    else:
+        print("Vectors features not found. Exit")
+        exit()
+    total_files = len(data_set)
+    index = hnswlib.Index(space='cosine', dim=dims) # possible options are l2, cosine or ip
+    if os.path.exists(index_file_path) == False:
+        index.init_index(max_elements = total_files,ef_construction = 2000, M = 16)
+        index.add_items(data_set)
+        index.set_ef(50)
+        index.save_index(index_file_path)
+    else:
+        index.load_index(index_file_path,max_elements = len(data_set))
+    
+    counter = 0    
+    while True:
+        try:
+            file_name,features_set = vector_feature_queue.get()
+            if file_name is None and features_set is None:
+                break
+            index.resize_index(index.get_max_elements()+1)
+            index.add_items([features_set])
+            data_set.append(features_set)
+            file_name_index[str(len(data_set)-1)] = resouces_folder + "vectors\\"+file_name
+            if counter == 1:
+                index.save_index(index_file_path)
+                with open(vector_features_file_path, 'w') as out:
+                    json.dump({'data':data_set},  out,cls=NumpyArrayEncoder,)
+                with open(vector_index_file_names_path, 'w') as out:
+                    json.dump(file_name_index,  out)
+                counter = 0
+            else:
+                counter += 1
+        except Exception as e:
+            print(e)    
+            continue
+    print("Finished indexing images")
+
+resouces_folder = '.\\test_data\\'
 if __name__ == "__main__":
-    # Simple demo that scans all the token transfers of RCC token (11k).
-    # The demo supports persistant state by using a JSON file.
-    # You will need an Ethereum node for this.
-    # Running this script will consume around 20k JSON-RPC calls.
-    # With locally running Geth, the script takes 10 minutes.
-    # The resulting JSON state file is 2.9 MB.
+    
     import sys
     import json
     from web3.providers.rpc import HTTPProvider
@@ -116,7 +181,7 @@ if __name__ == "__main__":
     # https://pypi.org/project/tqdm/
     from tqdm import tqdm
 
-    # RCC has around 11k Transfer events
+    
     # https://etherscan.io/token/0x9b6443b0fb9c241a7fdac375595cea13e6b7807a
     RCC_ADDRESS = Web3.toChecksumAddress("0x60f80121c31a0d46b5279700f9df786054aa5ee5")
     # RCC_ADDRESS = Web3.toChecksumAddress("0x9C008A22D71B6182029b694B0311486e4C0e53DB")
@@ -166,10 +231,13 @@ if __name__ == "__main__":
         state.restore()
         img_urls_queue = multiprocessing.Queue(maxsize=10)
         img_file_paths_queue = multiprocessing.Queue(maxsize=10)
+        vector_feature_queue = multiprocessing.Queue(maxsize=10)
         download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue))
-        processing_worker = multiprocessing.Process(target=img_processing_worker,args=(img_file_paths_queue,))
+        processing_worker = multiprocessing.Process(target=img_processing_worker,args=(img_file_paths_queue,vector_feature_queue))
+        indexing_worker = multiprocessing.Process(target=vectors_indexing_worker,args=(vector_feature_queue,))
         download_worker.start()
         processing_worker.start()
+        indexing_worker.start()
         # chain_id: int, web3: Web3, abi: dict, state: EventScannerState, events: List, filters: {}, max_chunk_scan_size: int=10000
         scanner = EventScanner(
             img_urls_queue=img_urls_queue,
@@ -194,7 +262,7 @@ if __name__ == "__main__":
 
         # Scan from [last block scanned] - [latest ethereum block]
         # Note that our chain reorg safety blocks cannot go negative
-        start_block = 12325024 # max(state.get_last_scanned_block() - chain_reorg_safety_blocks, 0)
+        start_block = 12326024 # max(state.get_last_scanned_block() - chain_reorg_safety_blocks, 0)
         end_block = 12326224 #scanner.get_suggested_scan_end_block()
         blocks_to_scan = end_block - start_block
 
@@ -213,10 +281,13 @@ if __name__ == "__main__":
 
             # Run the scan
             result, total_chunks_scanned = scanner.scan(start_block, end_block, progress_callback=_update_progress)
+            img_urls_queue.put((None,None))
 
         state.save()
+        
         download_worker.join()
         processing_worker.join()
+        indexing_worker.join()
         duration = time.time() - start
         print(f"Scanned total {len(result)} Transfer events, in {duration} seconds, total {total_chunks_scanned} chunk scans performed")
 
