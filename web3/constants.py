@@ -1,1 +1,1 @@
-resources_folder = '.\\test_data\\'
+resources_folder = '.\\prod_data\\'

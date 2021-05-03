@@ -31,13 +31,22 @@ class NumpyArrayEncoder(JSONEncoder):
             return obj.tolist()
         return JSONEncoder.default(self, obj)
 
-
+def is_vector_feature_exist(address_token):
+            address_token = resources_folder+"vectors\\"+address_token+".npz"
+            if os.path.exists(address_token):
+                return True
+          
+            return None   
 def download_image(gateway,file_name,url):
+        dot_location =  url.rfind(".")
+        file_type = url[dot_location:] if dot_location > 0 else ""
         if url.startswith('http') == False:
-            dot_location =  url.find(".")
-            file_type = url[dot_location:] if dot_location > 0 else ""
             url = gateway+url[url.rindex('ipfs'):]
-        
+
+        file_name_with_extension = file_name+file_type
+        vector_feature_file_content = is_vector_feature_exist(file_name_with_extension)
+        if is_vector_feature_exist(file_name_with_extension)  == True:
+            return file_name_with_extension,None
         image_response = requests.get(url,stream = True)
         
         if image_response.status_code == 200:
@@ -47,7 +56,9 @@ def download_image(gateway,file_name,url):
             # Open a local file with wb ( write binary ) permission.
             # with open("test_image"+file_type,'wb') as f:
             #     shutil.copyfileobj(image_response.raw, f)
-            return file_name+file_type, image_response.content
+            return file_name_with_extension, image_response.content
+        else:
+            return None,None
 
 
 def vectorized_image(image_name,image_content,tfhub_module):
@@ -72,13 +83,12 @@ def vectorized_image(image_name,image_content,tfhub_module):
             # Saves the 'feature_set' to a text file
             np.savetxt(out_path, feature_set, delimiter=',')
             return feature_set
-def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_queue:multiprocessing.Queue):
+def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_queue:multiprocessing.Queue,retry_queue:multiprocessing.Queue):
     gateway_queue = Queue(maxsize=5)
     gateway_queue.put('https://ipfs.io/')
     gateway_queue.put('https://gateway.ipfs.io/')
     gateway_queue.put('https://ipfs.drink.cafe/')
     gateway_queue.put('https://dweb.link/')
-    
     while True:
         try:
             gateway = gateway_queue.get()
@@ -87,14 +97,20 @@ def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_
                 img_file_paths_queue.put((None,None))
                 break
             print("################### downloading",url)
-            # download_image(gateway,file_name,url)
-            img_file_paths_queue.put(download_image(gateway,file_name,url))
+            file_path,img_content = download_image(gateway,file_name,url)
+            if file_path is not None:
+                img_file_paths_queue.put((file_path,img_content))
+            else:
+                print("Unable to download image {} from url {}".format(file_name,url))
         except Exception as e:
             print("Exception while downloading image:",e)
             # put it back so it will be handle by other gateways
             # TODO: need to check specific error
-            img_urls_queue.put((file_name,url))
-            time.sleep(10)    
+            try:
+                retry_queue.put_nowait((file_name,url))
+            except Exception as e:
+                print('Error while putting retry file into retry queue',e)
+            time.sleep(5)    
             continue
         finally:
             gateway_queue.put(gateway)
@@ -113,17 +129,22 @@ def img_processing_worker(img_file_paths_queue:multiprocessing.Queue,vector_feat
                 vector_feature_queue.put((None,None))
                 break
             print("================== processing",file_name)
-            features_set = vectorized_image(file_name,img_content,tfhub_module)
-            vector_feature_queue.put((file_name,features_set))
+            if img_content is not None:
+                features_set = vectorized_image(file_name,img_content,tfhub_module)
+                vector_feature_queue.put((file_name,features_set))
+            else:
+                features_set = np.loadtxt(resources_folder+"vectors\\"+file_name+".npz")
+                vector_feature_queue.put((file_name,features_set))
+    
         except Exception as e:
             print("Exception while processing image:",e)
             continue
     print("Finished processing images")
 
 
-def vectors_indexing_worker(vector_feature_queue:multiprocessing.Queue):
+def vectors_indexing_worker(vector_feature_queue:multiprocessing.Queue,files_in_index):
     data_set = []
-    file_name_index = {}
+    index_to_file_name = {}
     start_time = time.time()
     dims = 1792
     
@@ -135,7 +156,7 @@ def vectors_indexing_worker(vector_feature_queue:multiprocessing.Queue):
         with open(vector_features_file_path, "r") as read_file:
             data_set = list(np.asarray(json.load(read_file)['data']))
         with open(vector_index_file_names_path, "r") as read_file:
-            file_name_index = json.load(read_file)
+            index_to_file_name = json.load(read_file)
     else:
         print("Vectors features not found. Exit")
         exit()
@@ -153,22 +174,29 @@ def vectors_indexing_worker(vector_feature_queue:multiprocessing.Queue):
     while True:
         try:
             file_name,features_set = vector_feature_queue.get()
-            if file_name is None and features_set is None:
-                break
-            print("---------------------- indexing",file_name)
-            index.resize_index(index.get_max_elements()+1)
-            index.add_items([features_set])
-            data_set.append(features_set)
-            file_name_index[str(len(data_set)-1)] = resources_folder + "vectors\\"+file_name
-            if counter == 1:
+            
+            if counter == 300 or file_name is None:
+                print("Saving index to files")
                 index.save_index(index_file_path)
                 with open(vector_features_file_path, 'w') as out:
                     json.dump({'data':data_set},  out,cls=NumpyArrayEncoder,)
                 with open(vector_index_file_names_path, 'w') as out:
-                    json.dump(file_name_index,  out)
+                    json.dump(index_to_file_name,  out)
                 counter = 0
             else:
                 counter += 1
+            if file_name is not None and features_set is not None:
+                
+                print("---------------------- indexing",file_name)
+                if files_in_index.get(file_name) != None:
+                    continue
+                index.resize_index(index.get_max_elements()+1)
+                index.add_items([features_set])
+                data_set.append(features_set)                
+                index_to_file_name[str(len(data_set)-1)] = resources_folder + "vectors\\"+file_name
+                files_in_index[file_name] = file_name
+            else:
+                break
         except Exception as e:
             print("Exception while indexing image",e)    
             continue
@@ -224,6 +252,7 @@ if __name__ == "__main__":
         provider.middlewares.clear()
 
         web3 = Web3(provider)
+        multiprocessing_manager = multiprocessing.Manager()
 
         # Prepare stub ERC-20 contract object
         abi = json.loads(ABI)
@@ -235,14 +264,25 @@ if __name__ == "__main__":
         img_urls_queue = multiprocessing.Queue(maxsize=10)
         img_file_paths_queue = multiprocessing.Queue(maxsize=10)
         vector_feature_queue = multiprocessing.Queue(maxsize=10)
-        download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue))
+        retry_queue = multiprocessing.Queue(maxsize=0)
+        files_in_index = multiprocessing_manager.dict()
+        with open(resources_folder+"index_file_names.json", "r") as read_file:
+            index_to_file_name = json.load(read_file)
+            for name in index_to_file_name.values():
+                files_in_index[name] = name
+        download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
+        second_download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
+
         processing_worker = multiprocessing.Process(target=img_processing_worker,args=(img_file_paths_queue,vector_feature_queue))
-        indexing_worker = multiprocessing.Process(target=vectors_indexing_worker,args=(vector_feature_queue,))
+        indexing_worker = multiprocessing.Process(target=vectors_indexing_worker,args=(vector_feature_queue,files_in_index))
         download_worker.start()
         processing_worker.start()
         indexing_worker.start()
+        second_download_worker.start()
         # chain_id: int, web3: Web3, abi: dict, state: EventScannerState, events: List, filters: {}, max_chunk_scan_size: int=10000
         scanner = EventScanner(
+            files_in_index=files_in_index,
+            retry_queue=retry_queue,
             img_urls_queue=img_urls_queue,
             web3=web3,
             contract=ERC721,
@@ -265,8 +305,8 @@ if __name__ == "__main__":
 
         # Scan from [last block scanned] - [latest ethereum block]
         # Note that our chain reorg safety blocks cannot go negative
-        start_block = 12326024 # max(state.get_last_scanned_block() - chain_reorg_safety_blocks, 0)
-        end_block = 12326224 #scanner.get_suggested_scan_end_block()
+        start_block = 12174312 # max(state.get_last_scanned_block() - chain_reorg_safety_blocks, 0)
+        end_block = 12274312 #scanner.get_suggested_scan_end_block()
         blocks_to_scan = end_block - start_block
 
         print(f"Scanning events from blocks {start_block} - {end_block}")
@@ -285,10 +325,12 @@ if __name__ == "__main__":
             # Run the scan
             result, total_chunks_scanned = scanner.scan(start_block, end_block, progress_callback=_update_progress)
             img_urls_queue.put((None,None))
+            img_urls_queue.put((None,None))
 
         state.save()
         
         download_worker.join()
+        second_download_worker.join()
         processing_worker.join()
         indexing_worker.join()
         duration = time.time() - start
