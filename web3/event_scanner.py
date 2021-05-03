@@ -24,6 +24,7 @@ from web3.contract import Contract
 from web3.datastructures import AttributeDict
 from web3.exceptions import BlockNotFound
 from eth_abi.codec import ABICodec
+from multiprocessing import Manager
 
 # Currently this method is not exposed over official web3 API,
 # but we need it to construct eth_getLogs parameters
@@ -47,7 +48,7 @@ class EventScanner:
     because it cannot correctly throttle and decrease the `eth_getLogs` block number range.
     """
 
-    def __init__(self, img_urls_queue:multiprocessing.Queue, web3: Web3, contract: Contract, state: EventScannerState, events: List, filters: {},
+    def __init__(self,files_in_index:Manager,retry_queue:multiprocessing.Queue, img_urls_queue:multiprocessing.Queue, web3: Web3, contract: Contract, state: EventScannerState, events: List, filters: {},
                  max_chunk_scan_size: int = 10000, max_request_retries: int = 30, request_retry_seconds: float = 3.0):
         """
         :param contract: Contract
@@ -57,6 +58,8 @@ class EventScanner:
         :param max_request_retries: How many times we try to reattempt a failed JSON-RPC call
         :param request_retry_seconds: Delay between failed requests to let JSON-RPC server to recover
         """
+        self.files_in_index = files_in_index
+        self.retry_queue = retry_queue
         self.img_urls_queue = img_urls_queue
         self.logger = logger
         self.contract = contract
@@ -66,7 +69,7 @@ class EventScanner:
         self.filters = filters
 
         # Our JSON-RPC throttling parameters
-        self.min_scan_chunk_size = 10  # 12 s/block = 120 seconds period
+        self.min_scan_chunk_size = 1000  # 12 s/block = 120 seconds period
         self.max_scan_chunk_size = max_chunk_scan_size
         self.max_request_retries = max_request_retries
         self.request_retry_seconds = request_retry_seconds
@@ -170,17 +173,21 @@ class EventScanner:
 
                 block_number = evt["blockNumber"]
 
-                # Get UTC time when this event happened (block mined timestamp)
-                # from our in-memory cache
-                block_when = get_block_when(block_number)
-
+                
                 logger.debug("Processing event %s, block:%d count:%d", evt["event"], evt["blockNumber"])
-                file_name,ipfs_url,processed = self.state.process_event(self.web3,block_when, evt)
+                address_token,ipfs_url,processed = self.state.process_event(self.files_in_index,self.web3, evt)
                 if ipfs_url != None:
-                    self.img_urls_queue.put((file_name,ipfs_url))
+                    self.img_urls_queue.put((address_token,ipfs_url))
+               
                 all_processed.append(processed)
+            
+            while True:    
+                try:
+                    self.img_urls_queue.put(self.retry_queue.get_nowait())
+                except Exception as e:
+                    break
 
-        end_block_timestamp = get_block_when(end_block)
+        end_block_timestamp = None#get_block_when(end_block)
         return end_block, end_block_timestamp, all_processed
 
     def estimate_next_chunk_size(self, current_chuck_size: int, event_found_count: int):
