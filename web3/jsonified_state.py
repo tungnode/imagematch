@@ -9,6 +9,7 @@ import requests
 from queue import Queue
 from os import path
 from constants import resources_folder
+from multiprocessing import Manager
 class JSONifiedState(EventScannerState):
         """Store the state of scanned blocks and all events.
 
@@ -20,6 +21,7 @@ class JSONifiedState(EventScannerState):
             # self.resources_folder = resouces_folder
             self.state = None
             self.address_token_owners = {}
+            self.non_exist_tokens = {}
             self.tokens_file_name = resources_folder+"addresses_tokens_owners_data.json"
             self.fname = resources_folder+"test-state.json"
             # How many second ago we saved the JSON file
@@ -47,10 +49,16 @@ class JSONifiedState(EventScannerState):
                 self.reset()
             
             try:
-                self.address_token_owners = json.load(open(self.tokens_file_name),rt)
+                self.address_token_owners = json.load(open(self.tokens_file_name,"rt"))
                 print("Loaded address_token_owners")
             except Exception as e:
-                print(e)    
+                print(e) 
+
+            try:
+                self.non_exist_tokens = json.load(open(resources_folder+'nonExistTokens.json',"rt"))
+                print("Loaded non exist tokens")
+            except Exception as e:
+                print(e)        
 
         def save(self):
             """Save everything we have scanned so far in a file."""
@@ -60,6 +68,9 @@ class JSONifiedState(EventScannerState):
 
             with open(self.tokens_file_name, "wt") as fw:
                 json.dump(self.address_token_owners, fw)
+            
+            with open(resources_folder+'nonExistTokens.json', "wt") as fw:
+                json.dump(self.non_exist_tokens, fw)
 
 
         #
@@ -121,9 +132,19 @@ class JSONifiedState(EventScannerState):
                         img_uri = gateway+img_uri[img_uri.rindex('ipfs'):]
                     json_response = requests.get(img_uri, stream = True)
                     img_uri = json_response.json()['image']
-                return token_uri,img_uri
+                    if img_uri.find('.webp') > 0 or img_uri.find('.mp4') > 0:
+                        return None,None
+                    else:
+                        return token_uri,img_uri
+                else:
+                    return None,None    
+                
             except Exception as e:
                 print("Exception while getting token URI",e)
+                if str(e).find("nonexistent token") > 0:
+                    key = contract_address+"_"+str(token_id)
+                    self.non_exist_tokens[key] = key
+
                 return None,None
             finally:
                 self.gateway_queue.put(gateway)    
@@ -152,7 +173,7 @@ class JSONifiedState(EventScannerState):
                 return False    
 
 
-        def process_event(self, web3: Web3, block_when: datetime.datetime, event: AttributeDict) -> str:
+        def process_event(self, files_in_index, web3: Web3,  event: AttributeDict) -> str:
             """Record a ERC-20 transfer in our database."""
             # Events are keyed by their transaction hash and log index
             # One transaction may contain multiple events
@@ -169,15 +190,16 @@ class JSONifiedState(EventScannerState):
             transfer = {
                 "from": args["from"],
                 "to": args.to,
-                "tokenId": args.tokenId,
-                "timestamp": block_when.isoformat(),
+                "tokenId": args.tokenId
             }
             address_token = event['address']+"_"+str(args.tokenId)
             token_uri = None
             img_uri = None
-            if self.is_vector_feature_exist(address_token) == False:
-                token_uri,img_uri = self.get_token_uri(web3,event['address'],args.tokenId)
-            self.add_owners_to_state(address_token,transfer,token_uri,img_uri)
+            if (self.non_exist_tokens.get(address_token) == None
+                or files_in_index.get(address_token) == None):
+                    token_uri,img_uri = self.get_token_uri(web3,event['address'],args.tokenId)
+            if token_uri is not None and img_uri is not None:
+                self.add_owners_to_state(address_token,transfer,token_uri,img_uri)
             # print(transfer)
             # Create empty dict as the block that contains all transactions by txhash
             if block_number not in self.state["blocks"]:
