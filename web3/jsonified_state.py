@@ -193,10 +193,11 @@ class JSONifiedState(EventScannerState):
                 "tokenId": args.tokenId
             }
             address_token = event['address']+"_"+str(args.tokenId)
+            address_token = address_token.lower()
             token_uri = None
             img_uri = None
             if (self.non_exist_tokens.get(address_token) == None
-                or files_in_index.get(address_token) == None):
+                and files_in_index.get("\\"+address_token) == None):
                     token_uri,img_uri = self.get_token_uri(web3,event['address'],args.tokenId)
             if token_uri is not None and img_uri is not None:
                 self.add_owners_to_state(address_token,transfer,token_uri,img_uri)

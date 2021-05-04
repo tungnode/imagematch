@@ -33,18 +33,16 @@ class NumpyArrayEncoder(JSONEncoder):
 
 def is_vector_feature_exist(address_token):
             address_token = resources_folder+"vectors\\"+address_token+".npz"
-            if os.path.exists(address_token):
-                return True
+            return os.path.exists(address_token)
+                
           
-            return None   
-def download_image(gateway,file_name,url):
-        dot_location =  url.rfind(".")
+def download_image(gateway,address_token,url):
+        dot_location =  url.lower().rfind(".")
         file_type = url[dot_location:] if dot_location > 0 else ""
         if url.startswith('http') == False:
             url = gateway+url[url.rindex('ipfs'):]
 
-        file_name_with_extension = file_name+file_type
-        vector_feature_file_content = is_vector_feature_exist(file_name_with_extension)
+        file_name_with_extension = address_token+file_type
         if is_vector_feature_exist(file_name_with_extension)  == True:
             return file_name_with_extension,None
         image_response = requests.get(url,stream = True)
@@ -92,22 +90,22 @@ def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_
     while True:
         try:
             gateway = gateway_queue.get()
-            file_name,url = img_urls_queue.get()
-            if file_name is None and url is None:
+            address_token,url = img_urls_queue.get()
+            if address_token is None and url is None:
                 img_file_paths_queue.put((None,None))
                 break
-            print("################### downloading",url)
-            file_path,img_content = download_image(gateway,file_name,url)
-            if file_path is not None:
-                img_file_paths_queue.put((file_path,img_content))
+            print("############### downloading {} from {}".format(address_token,url))
+            address_token_img_type,img_content = download_image(gateway,address_token,url)
+            if address_token_img_type is not None:
+                img_file_paths_queue.put((address_token_img_type,img_content))
             else:
-                print("Unable to download image {} from url {}".format(file_name,url))
+                print("Unable to download image {} from url {}".format(address_token,url))
         except Exception as e:
             print("Exception while downloading image:",e)
             # put it back so it will be handle by other gateways
             # TODO: need to check specific error
             try:
-                retry_queue.put_nowait((file_name,url))
+                retry_queue.put_nowait((address_token,url))
             except Exception as e:
                 print('Error while putting retry file into retry queue',e)
             time.sleep(5)    
@@ -124,17 +122,19 @@ def img_processing_worker(img_file_paths_queue:multiprocessing.Queue,vector_feat
     while True:
         try:
 
-            file_name,img_content = img_file_paths_queue.get()
-            if file_name is None and img_content is None:
-                vector_feature_queue.put((None,None))
+            address_token_img_type,img_content = img_file_paths_queue.get()
+            if address_token_img_type is None and img_content is None:
+                # vector_feature_queue.put((None,None))
                 break
-            print("================== processing",file_name)
+            
             if img_content is not None:
-                features_set = vectorized_image(file_name,img_content,tfhub_module)
-                vector_feature_queue.put((file_name,features_set))
+                print("=============== vectorizing",address_token_img_type)
+                features_set = vectorized_image(address_token_img_type,img_content,tfhub_module)
+                # vector_feature_queue.put((address_token_img_type,features_set))
             else:
-                features_set = np.loadtxt(resources_folder+"vectors\\"+file_name+".npz")
-                vector_feature_queue.put((file_name,features_set))
+                print("=============== loading vector feature",address_token_img_type)
+                features_set = np.loadtxt(resources_folder+"vectors\\"+address_token_img_type+".npz")
+                # vector_feature_queue.put((address_token_img_type,features_set))
     
         except Exception as e:
             print("Exception while processing image:",e)
@@ -153,14 +153,13 @@ def vectors_indexing_worker(vector_feature_queue:multiprocessing.Queue,files_in_
     index_file_path = resources_folder+'hnswlib.bin'
 
     if os.path.exists(vector_features_file_path):
-        with open(vector_features_file_path, "r") as read_file:
-            data_set = list(np.asarray(json.load(read_file)['data']))
+        # with open(vector_features_file_path, "r") as read_file:
+        #     data_set = list(np.asarray(json.load(read_file)['data']))
         with open(vector_index_file_names_path, "r") as read_file:
             index_to_file_name = json.load(read_file)
     else:
         print("Vectors features not found. Exit")
         exit()
-    total_files = len(data_set)
     index = hnswlib.Index(space='cosine', dim=dims) # possible options are l2, cosine or ip
     if os.path.exists(index_file_path) == False:
         index.init_index(max_elements = total_files,ef_construction = 2000, M = 16)
@@ -173,28 +172,31 @@ def vectors_indexing_worker(vector_feature_queue:multiprocessing.Queue,files_in_
     counter = 0    
     while True:
         try:
-            file_name,features_set = vector_feature_queue.get()
+            address_token_img_type,features_set = vector_feature_queue.get()
             
-            if counter == 300 or file_name is None:
-                print("Saving index to files")
+            if counter == 1000 or address_token_img_type is None:
+                print("--------------- Saving index to files")
                 index.save_index(index_file_path)
-                with open(vector_features_file_path, 'w') as out:
-                    json.dump({'data':data_set},  out,cls=NumpyArrayEncoder,)
+                # with open(vector_features_file_path, 'w') as out:
+                #     json.dump({'data':data_set},  out,cls=NumpyArrayEncoder,)
                 with open(vector_index_file_names_path, 'w') as out:
                     json.dump(index_to_file_name,  out)
                 counter = 0
             else:
                 counter += 1
-            if file_name is not None and features_set is not None:
+            if address_token_img_type is not None and features_set is not None:
                 
-                print("---------------------- indexing",file_name)
-                if files_in_index.get(file_name) != None:
+                file_path = resources_folder + "vectors\\"+address_token_img_type+".npz"
+                key_of_files_in_index = "\\"+address_token_img_type.split(".")[0]
+                key_of_files_in_index = key_of_files_in_index.lower()
+                if files_in_index.get(key_of_files_in_index) != None:
                     continue
+                print("--------------- indexing",address_token_img_type)
                 index.resize_index(index.get_max_elements()+1)
                 index.add_items([features_set])
-                data_set.append(features_set)                
-                index_to_file_name[str(len(data_set)-1)] = resources_folder + "vectors\\"+file_name
-                files_in_index[file_name] = file_name
+                # data_set.append(features_set)                
+                index_to_file_name[str(len(data_set)-1)] = file_path
+                files_in_index[key_of_files_in_index] = file_path
             else:
                 break
         except Exception as e:
@@ -261,24 +263,28 @@ if __name__ == "__main__":
         # Restore/create our persistent state
         state = JSONifiedState()
         state.restore()
-        img_urls_queue = multiprocessing.Queue(maxsize=10)
-        img_file_paths_queue = multiprocessing.Queue(maxsize=10)
-        vector_feature_queue = multiprocessing.Queue(maxsize=10)
+        queue_size = 1000
+        img_urls_queue = multiprocessing.Queue(maxsize=queue_size)
+        img_file_paths_queue = multiprocessing.Queue(maxsize=queue_size)
+        vector_feature_queue = multiprocessing.Queue(maxsize=queue_size)
         retry_queue = multiprocessing.Queue(maxsize=0)
         files_in_index = multiprocessing_manager.dict()
-        with open(resources_folder+"index_file_names.json", "r") as read_file:
-            index_to_file_name = json.load(read_file)
-            for name in index_to_file_name.values():
-                files_in_index[name] = name
+        read_file = open(resources_folder+"index_file_names.json", "r")
+        index_to_file_name = json.load(read_file)
+        for name in index_to_file_name.values():
+            name = name[name.rfind('\\'):]
+            name = name[:name.find('.')]
+            name = name.lower()
+            files_in_index[name] = name
         download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
-        second_download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
+        # second_download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
 
         processing_worker = multiprocessing.Process(target=img_processing_worker,args=(img_file_paths_queue,vector_feature_queue))
-        indexing_worker = multiprocessing.Process(target=vectors_indexing_worker,args=(vector_feature_queue,files_in_index))
+        # indexing_worker = multiprocessing.Process(target=vectors_indexing_worker,args=(vector_feature_queue,files_in_index))
         download_worker.start()
         processing_worker.start()
-        indexing_worker.start()
-        second_download_worker.start()
+        # indexing_worker.start()
+        # second_download_worker.start()
         # chain_id: int, web3: Web3, abi: dict, state: EventScannerState, events: List, filters: {}, max_chunk_scan_size: int=10000
         scanner = EventScanner(
             files_in_index=files_in_index,
@@ -305,8 +311,8 @@ if __name__ == "__main__":
 
         # Scan from [last block scanned] - [latest ethereum block]
         # Note that our chain reorg safety blocks cannot go negative
-        start_block = 12174312 # max(state.get_last_scanned_block() - chain_reorg_safety_blocks, 0)
-        end_block = 12274312 #scanner.get_suggested_scan_end_block()
+        start_block = 11874312 # max(state.get_last_scanned_block() - chain_reorg_safety_blocks, 0)
+        end_block = 12174312 #scanner.get_suggested_scan_end_block()
         blocks_to_scan = end_block - start_block
 
         print(f"Scanning events from blocks {start_block} - {end_block}")
@@ -330,9 +336,9 @@ if __name__ == "__main__":
         state.save()
         
         download_worker.join()
-        second_download_worker.join()
+        # second_download_worker.join()
         processing_worker.join()
-        indexing_worker.join()
+        # indexing_worker.join()
         duration = time.time() - start
         print(f"Scanned total {len(result)} Transfer events, in {duration} seconds, total {total_chunks_scanned} chunk scans performed")
 
