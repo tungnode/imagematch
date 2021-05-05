@@ -85,9 +85,9 @@ def vectorized_image(image_name,image_content,tfhub_module):
             np.savetxt(out_path, feature_set, delimiter=',')
             del decoded_img
             del features
-            del feature_set
-            return None
-            # return feature_set
+            # del feature_set
+            # return None
+            return feature_set
 def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_queue:multiprocessing.Queue,retry_queue:multiprocessing.Queue):
     gateway_queue = Queue(maxsize=5)
     gateway_queue.put('https://ipfs.io/')
@@ -131,18 +131,18 @@ def img_vectorizing_worker(img_file_paths_queue:multiprocessing.Queue,vector_fea
 
             address_token_img_type,img_content = img_file_paths_queue.get()
             if address_token_img_type is None and img_content is None:
-                # vector_feature_queue.put((None,None))
+                vector_feature_queue.put((None,None))
                 break
             
             if img_content is not None:
                 print("=============== vectorizing",address_token_img_type)
                 features_set = vectorized_image(address_token_img_type,img_content,tfhub_module)
                 
-                # vector_feature_queue.put((address_token_img_type,features_set))
-            # else:
-            #     print("=============== loading vector feature",address_token_img_type)
-            #     features_set = np.loadtxt(resources_folder+"vectors\\"+address_token_img_type+".npz")
-                # vector_feature_queue.put((address_token_img_type,features_set))
+                vector_feature_queue.put((address_token_img_type,features_set))
+            else:
+                print("=============== loading vector feature",address_token_img_type)
+                features_set = np.loadtxt(resources_folder+"vectors\\"+address_token_img_type+".npz")
+                vector_feature_queue.put((address_token_img_type,features_set))
             del img_content
             gc.collect()
 
@@ -159,41 +159,56 @@ def vectors_indexing_worker(vector_feature_queue:multiprocessing.Queue,files_in_
     dims = 1792
     
     vector_features_file_path = resources_folder+"vectors_features.json"
-    vector_index_file_names_path = resources_folder+"index_file_names.json"
+    vector_index_file_names_path = resources_folder+"index_to_file_name.json"
     index_file_path = resources_folder+'hnswlib.bin'
+    number_100k = 10000
 
-    if os.path.exists(vector_features_file_path):
-        # with open(vector_features_file_path, "r") as read_file:
-        #     data_set = list(np.asarray(json.load(read_file)['data']))
-        with open(vector_index_file_names_path, "r") as read_file:
-            index_to_file_name = json.load(read_file)
-    else:
-        print("Vectors features not found. Exit")
-        exit()
-    index = hnswlib.Index(space='cosine', dim=dims) # possible options are l2, cosine or ip
-    if os.path.exists(index_file_path) == False:
-        index.init_index(max_elements = total_files,ef_construction = 2000, M = 16)
-        index.add_items(data_set)
-        index.set_ef(50)
-        index.save_index(index_file_path)
-    else:
-        index.load_index(index_file_path,max_elements = len(data_set))
+    read_file =  open(vector_index_file_names_path, "r")
+    index_to_file_name = json.load(read_file)
     
+    indexed_number = len(index_to_file_name)
+    vector_features_batch_number = len(next(os.walk(resources_folder+"vector_features_batches"))[2])
+    number_features_in_batch = number_100k
     counter = 0    
     while True:
         try:
             address_token_img_type,features_set = vector_feature_queue.get()
-            
-            if counter == 1000 or address_token_img_type is None:
+            vector_features_file_path = resources_folder+"vector_features_batches\\"+str(vector_features_batch_number)
+            if counter == 100 or address_token_img_type is None:
+                
+                #     with open(vector_index_file_names_path, "r") as read_file:
+                #         from_file_index_to_file_name = json.load(read_file)
+                # else:
+                #     print("Vectors features not found. Exit")
+                #     exit()
+                index = hnswlib.Index(space='cosine', dim=dims) # possible options are l2, cosine or ip
+                if os.path.exists(index_file_path) == False:
+                   print("index file not exist, exit")
+                   exit()
+                index.load_index(index_file_path,max_elements = indexed_number)
+                index.add_items(data_set)
+                
                 print("--------------- Saving index to files")
                 index.save_index(index_file_path)
-                # with open(vector_features_file_path, 'w') as out:
-                #     json.dump({'data':data_set},  out,cls=NumpyArrayEncoder,)
+                if number_features_in_batch <=0:
+                    vector_features_batch_number += 1
+                    vector_features_file_path = resources_folder+"vector_features_batches\\"+str(vector_features_batch_number)
+                    number_features_in_batch = number_100k
+                else:
+                    if os.path.exists(vector_features_file_path):
+                        with open(vector_features_file_path, "r") as read_file:
+                            in_file_data_set = list(np.asarray(json.load(read_file)['data']))
+                            data_set = in_file_data_set + data_set
+                with open(vector_features_file_path, 'w') as out:
+                    json.dump({'data':data_set},  out,cls=NumpyArrayEncoder,)
                 with open(vector_index_file_names_path, 'w') as out:
                     json.dump(index_to_file_name,  out)
                 counter = 0
-            else:
-                counter += 1
+                del index
+                data_set.clear() 
+
+           
+                
             if address_token_img_type is not None and features_set is not None:
                 
                 file_path = resources_folder + "vectors\\"+address_token_img_type+".npz"
@@ -202,13 +217,16 @@ def vectors_indexing_worker(vector_feature_queue:multiprocessing.Queue,files_in_
                 if files_in_index.get(key_of_files_in_index) != None:
                     continue
                 print("--------------- indexing",address_token_img_type)
-                index.resize_index(index.get_max_elements()+1)
-                index.add_items([features_set])
-                # data_set.append(features_set)                
-                index_to_file_name[str(len(data_set)-1)] = file_path
+                data_set.append(features_set)                
+                index_to_file_name[str(indexed_number)] = file_path
                 files_in_index[key_of_files_in_index] = file_path
+                indexed_number += 1
+                counter += 1
+                number_features_in_batch -= 1
             else:
                 break
+            
+            gc.collect()
         except Exception as e:
             print("Exception while indexing image",e)    
             continue
@@ -279,7 +297,7 @@ if __name__ == "__main__":
         vector_feature_queue = multiprocessing.Queue(maxsize=queue_size)
         retry_queue = multiprocessing.Queue(maxsize=0)
         files_in_index = multiprocessing_manager.dict()
-        read_file = open(resources_folder+"index_file_names.json", "r")
+        read_file = open(resources_folder+"index_to_file_name.json", "r")
         index_to_file_name = json.load(read_file)
         for name in index_to_file_name.values():
             name = name[name.rfind('\\'):]
@@ -288,13 +306,15 @@ if __name__ == "__main__":
             files_in_index[name] = name
         download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
         second_download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
+        third_download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
 
         processing_worker = multiprocessing.Process(target=img_vectorizing_worker,args=(img_file_paths_queue,vector_feature_queue))
-        # indexing_worker = multiprocessing.Process(target=vectors_indexing_worker,args=(vector_feature_queue,files_in_index))
+        indexing_worker = multiprocessing.Process(target=vectors_indexing_worker,args=(vector_feature_queue,files_in_index))
         download_worker.start()
         processing_worker.start()
-        # indexing_worker.start()
+        indexing_worker.start()
         second_download_worker.start()
+        third_download_worker.start()
         # chain_id: int, web3: Web3, abi: dict, state: EventScannerState, events: List, filters: {}, max_chunk_scan_size: int=10000
         scanner = EventScanner(
             files_in_index=files_in_index,
@@ -342,13 +362,15 @@ if __name__ == "__main__":
             result, total_chunks_scanned = scanner.scan(start_block, end_block, progress_callback=_update_progress)
             img_urls_queue.put((None,None))
             img_urls_queue.put((None,None))
+            img_urls_queue.put((None,None))
 
         state.save()
         
         download_worker.join()
         second_download_worker.join()
+        third_download_worker.join()
         processing_worker.join()
-        # indexing_worker.join()
+        indexing_worker.join()
         duration = time.time() - start
         print(f"Scanned total {len(result)} Transfer events, in {duration} seconds, total {total_chunks_scanned} chunk scans performed")
 
