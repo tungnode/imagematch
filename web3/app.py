@@ -24,6 +24,9 @@ import hnswlib
 from json import JSONEncoder
 from constants import resources_folder
 import time
+from PIL import Image
+from PIL import GifImagePlugin
+import gc
 
 class NumpyArrayEncoder(JSONEncoder):
     def default(self, obj):
@@ -80,7 +83,11 @@ def vectorized_image(image_name,image_content,tfhub_module):
             out_path = os.path.join(resources_folder+'.\\vectors\\', outfile_name)
             # Saves the 'feature_set' to a text file
             np.savetxt(out_path, feature_set, delimiter=',')
-            return feature_set
+            del decoded_img
+            del features
+            del feature_set
+            return None
+            # return feature_set
 def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_queue:multiprocessing.Queue,retry_queue:multiprocessing.Queue):
     gateway_queue = Queue(maxsize=5)
     gateway_queue.put('https://ipfs.io/')
@@ -114,7 +121,7 @@ def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_
             gateway_queue.put(gateway)
     print("Finished downloading images")
 
-def img_processing_worker(img_file_paths_queue:multiprocessing.Queue,vector_feature_queue:multiprocessing.Queue):
+def img_vectorizing_worker(img_file_paths_queue:multiprocessing.Queue,vector_feature_queue:multiprocessing.Queue):
     # Definition of module with using tfhub.dev
     module_handle = "https://tfhub.dev/google/imagenet/mobilenet_v2_140_224/feature_vector/4"
     # Loads the module
@@ -130,12 +137,15 @@ def img_processing_worker(img_file_paths_queue:multiprocessing.Queue,vector_feat
             if img_content is not None:
                 print("=============== vectorizing",address_token_img_type)
                 features_set = vectorized_image(address_token_img_type,img_content,tfhub_module)
+                
                 # vector_feature_queue.put((address_token_img_type,features_set))
-            else:
-                print("=============== loading vector feature",address_token_img_type)
-                features_set = np.loadtxt(resources_folder+"vectors\\"+address_token_img_type+".npz")
+            # else:
+            #     print("=============== loading vector feature",address_token_img_type)
+            #     features_set = np.loadtxt(resources_folder+"vectors\\"+address_token_img_type+".npz")
                 # vector_feature_queue.put((address_token_img_type,features_set))
-    
+            del img_content
+            gc.collect()
+
         except Exception as e:
             print("Exception while processing image:",e)
             continue
@@ -263,7 +273,7 @@ if __name__ == "__main__":
         # Restore/create our persistent state
         state = JSONifiedState()
         state.restore()
-        queue_size = 1000
+        queue_size = 10
         img_urls_queue = multiprocessing.Queue(maxsize=queue_size)
         img_file_paths_queue = multiprocessing.Queue(maxsize=queue_size)
         vector_feature_queue = multiprocessing.Queue(maxsize=queue_size)
@@ -277,14 +287,14 @@ if __name__ == "__main__":
             name = name.lower()
             files_in_index[name] = name
         download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
-        # second_download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
+        second_download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
 
-        processing_worker = multiprocessing.Process(target=img_processing_worker,args=(img_file_paths_queue,vector_feature_queue))
+        processing_worker = multiprocessing.Process(target=img_vectorizing_worker,args=(img_file_paths_queue,vector_feature_queue))
         # indexing_worker = multiprocessing.Process(target=vectors_indexing_worker,args=(vector_feature_queue,files_in_index))
         download_worker.start()
         processing_worker.start()
         # indexing_worker.start()
-        # second_download_worker.start()
+        second_download_worker.start()
         # chain_id: int, web3: Web3, abi: dict, state: EventScannerState, events: List, filters: {}, max_chunk_scan_size: int=10000
         scanner = EventScanner(
             files_in_index=files_in_index,
@@ -336,7 +346,7 @@ if __name__ == "__main__":
         state.save()
         
         download_worker.join()
-        # second_download_worker.join()
+        second_download_worker.join()
         processing_worker.join()
         # indexing_worker.join()
         duration = time.time() - start
