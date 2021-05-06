@@ -61,7 +61,7 @@ def is_already_exist(master_file_name,neighbor_file_name):
         return True
 def annoy_similarity(file_index_to_file_name,file_index_to_file_vector):
     
-    n_nearest_neighbors = 2
+    n_nearest_neighbors = 10
     trees = 10000
     t = AnnoyIndex(dims, metric='angular')
     for k in file_index_to_file_vector:
@@ -108,8 +108,8 @@ def annoy_similarity(file_index_to_file_name,file_index_to_file_vector):
     return all_nearest_neighboor
 
 
-
-with open('.\\addresses_tokens_owners_data1.json') as json_file:
+resouces_folder = '.\\prod_data\\'
+with open(resouces_folder+'addresses_tokens_owners_data.json') as json_file:
     map_of_token_with_owners = json.load(json_file)
 neighbor_master_set = {}
 dims = 1792
@@ -123,7 +123,7 @@ if __name__ == '__main__':
     start_time = time.time()
 
 
-    resouces_folder = '.\\test_data\\'
+    
     vector_features_file_path = resouces_folder+"vectors_features.json"
     vector_index_file_names_path = resouces_folder+"index_file_names.json"
     index_file_path = resouces_folder+'hnswlib.bin'
@@ -186,7 +186,7 @@ if __name__ == '__main__':
     annoy_file_index_to_file_vector = {}
 
     # all_nearest_data = index.knnQueryBatch(data_set, k=10, num_threads=4)
-    labels, distances = index.knn_query(data_set, k = 2) 
+    labels, distances = index.knn_query(data_set, k = 10) 
     named_nearest_neighbors = []
     for master_index, master in enumerate(distances):
        
