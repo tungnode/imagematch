@@ -48,7 +48,7 @@ class EventScanner:
     because it cannot correctly throttle and decrease the `eth_getLogs` block number range.
     """
 
-    def __init__(self,files_in_index:Manager,retry_queue:multiprocessing.Queue, img_urls_queue:multiprocessing.Queue, web3: Web3, contract: Contract, state: EventScannerState, events: List, filters: {},
+    def __init__(self,indexed_files:dict,retry_queue:multiprocessing.Queue, img_urls_queue:multiprocessing.Queue, web3: Web3, contract: Contract, state: EventScannerState, events: List, filters: {},
                  max_chunk_scan_size: int = 10000, max_request_retries: int = 30, request_retry_seconds: float = 3.0):
         """
         :param contract: Contract
@@ -58,7 +58,7 @@ class EventScanner:
         :param max_request_retries: How many times we try to reattempt a failed JSON-RPC call
         :param request_retry_seconds: Delay between failed requests to let JSON-RPC server to recover
         """
-        self.files_in_index = files_in_index
+        self.indexed_files = indexed_files
         self.retry_queue = retry_queue
         self.img_urls_queue = img_urls_queue
         self.logger = logger
@@ -175,9 +175,9 @@ class EventScanner:
 
                 
                 logger.debug("Processing event %s, block:%d count:%d", evt["event"], evt["blockNumber"])
-                address_token,ipfs_url,processed = self.state.process_event(self.files_in_index,self.web3, evt)
+                address_token,ipfs_url,processed = self.state.process_event(self.indexed_files,self.web3, evt)
                 if ipfs_url != None:
-                    self.img_urls_queue.put((address_token,ipfs_url))
+                    self.img_urls_queue.put((address_token,ipfs_url,1))
                
                 all_processed.append(processed)
             

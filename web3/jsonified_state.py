@@ -8,6 +8,7 @@ from web3.datastructures import AttributeDict
 import requests
 from queue import Queue
 from os import path
+import httplib2
 from constants import resources_folder
 from multiprocessing import Manager
 class JSONifiedState(EventScannerState):
@@ -26,12 +27,20 @@ class JSONifiedState(EventScannerState):
             self.fname = resources_folder+"test-state.json"
             # How many second ago we saved the JSON file
             self.last_save = 0
-            self.gateway_queue = Queue(maxsize=5)
+            self.gateway_queue = Queue()
             self.gateway_queue.put('https://ipfs.io/')
             self.gateway_queue.put('https://gateway.ipfs.io/')
             self.gateway_queue.put('https://ipfs.drink.cafe/')
             self.gateway_queue.put('https://dweb.link/')
-
+            self.gateway_queue.put('https://infura.io/')
+            self.gateway_queue.put('https://gateway.pinata.cloud/')
+            self.gateway_queue.put('https://ipfs.fleek.co/')
+            self.gateway_queue.put('https://cloudflare-ipfs.com/')
+            self.gateway_queue.put('https://ipfs.denarius.io/')
+            self.gateway_queue.put('https://cf-ipfs.com/')
+            self.gateway_queue.put('https://10.via0.com/')
+            self.gateway_queue.put('https://bin.d0x.to/')
+            self.gateway_queue.put('https://ipfs.itargo.io/')
         def reset(self):
             """Create initial state of nothing scanned."""
             self.state = {
@@ -99,8 +108,9 @@ class JSONifiedState(EventScannerState):
             if time.time() - self.last_save > 60:
                 self.save()
         
-        def get_token_uri(self, web3, contract_address, token_id):
+        def get_token_uri(self, web3, contract_address, token_id,retry_number):
             gateway = self.gateway_queue.get()
+            key = contract_address+"_"+str(token_id)
             try:
                 simplified_abi = [{
                     "constant": True,
@@ -130,22 +140,42 @@ class JSONifiedState(EventScannerState):
                     if img_uri.startswith('http') == False:
                         
                         img_uri = gateway+img_uri[img_uri.rindex('ipfs'):]
-                    json_response = requests.get(img_uri, stream = True)
-                    img_uri = json_response.json()['image']
-                    if img_uri.find('.webp') > 0 or img_uri.find('.mp4') > 0:
-                        return None,None
-                    else:
-                        return token_uri,img_uri
+                    # headers = { 
+                    #     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36', 
+                    #     'ACCEPT':'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+                    #     'ACCEPT-ENCODING':'gzip, deflate, br'
+                    #     
+                    # 
+                    headers = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.75 Safari/537.36'}
+
+                    requestMaker = httplib2.Http(".cache")
+                    (res_headers,json_response) = requestMaker.request(img_uri,"GET",headers=headers)
+                    try:
+                        img_uri = json.loads(json_response)['image']
+                        external_url = json.loads(json_response)['external_url']
+                        if img_uri.find('.webp') > 0 or img_uri.find('.mp4') > 0:
+                            return None,None,None
+                        else:
+                            return token_uri,img_uri,external_url
+                    except Exception as e:
+                        self.non_exist_tokens[key] = key
+                        return None,None,None
                 else:
-                    return None,None    
+                    return None,None,None    
                 
             except Exception as e:
                 print("Exception while getting token URI",e)
                 if str(e).find("nonexistent token") > 0:
-                    key = contract_address+"_"+str(token_id)
                     self.non_exist_tokens[key] = key
+                elif str(e).find('image') < 0:
+                 
+                    print("sleeping",retry_number*5)
+                    time.sleep(retry_number*5)
+                    if retry_number <= 3:
+                        retry_number += 1
+                        return self.get_token_uri(web3,contract_address,token_id,retry_number)    
 
-                return None,None
+                return None,None,None
             finally:
                 self.gateway_queue.put(gateway)    
                         
@@ -161,6 +191,8 @@ class JSONifiedState(EventScannerState):
                 existing_owners['token_uri'] = token_uri
             if img_uri is not None:    
                 existing_owners['img_uri'] = img_uri
+            if owners.get('exteral_url') is not None and existing_owners.get('external_url') is not None:
+                existing_owners['external_url'] = owners.get('external_url')
             self.address_token_owners[address_token] = existing_owners
     
         def is_vector_feature_exist(self,address_token):
@@ -173,7 +205,7 @@ class JSONifiedState(EventScannerState):
                 return False    
 
 
-        def process_event(self, files_in_index, web3: Web3,  event: AttributeDict) -> str:
+        def process_event(self, indexed_files:dict, web3: Web3,  event: AttributeDict) -> str:
             """Record a ERC-20 transfer in our database."""
             # Events are keyed by their transaction hash and log index
             # One transaction may contain multiple events
@@ -191,14 +223,17 @@ class JSONifiedState(EventScannerState):
                 "from": args["from"],
                 "to": args.to,
                 "tokenId": args.tokenId
+                
             }
             address_token = event['address']+"_"+str(args.tokenId)
             address_token = address_token.lower()
             token_uri = None
             img_uri = None
             if (self.non_exist_tokens.get(address_token) == None
-                and files_in_index.get("\\"+address_token) == None):
-                    token_uri,img_uri = self.get_token_uri(web3,event['address'],args.tokenId)
+                and indexed_files.get("\\"+address_token) == None):
+                    token_uri,img_uri,external_url = self.get_token_uri(web3,event['address'],args.tokenId,1)
+                    if external_url is not None:
+                        transfer['external_url'] = external_url
             if token_uri is not None and img_uri is not None:
                 self.add_owners_to_state(address_token,transfer,token_uri,img_uri)
             # print(transfer)

@@ -10,7 +10,6 @@ import numpy as np
 # Glob for reading file names in a folder
 import glob
 import os.path
-import tensorflow_io as tfio
 import gc
 #################################################
 #################################################
@@ -54,7 +53,7 @@ def get_image_feature_vectors():
     # Loads the module
     module = hub.load(module_handle)
     # Loops through all images in a local folder
-    files = glob.glob('..\\copyHunter\\scripts\\images_2\\*')
+    files = glob.glob('.\\lab\\*')
     # files = glob.glob('..\\copyHunter\\scripts\\images_20k\\*')
     # files.extend(glob.glob('..\\copyHunter\\scripts\\images_50k\\*'))
     # files.extend(glob.glob('..\\copyHunter\\scripts\\images\\*.jpg'))

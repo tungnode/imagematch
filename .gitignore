@@ -7,3 +7,6 @@
 /matched*
 /lab*
 /.history
+/prod_data*
+/web3/__pycache*
+/.cache*
