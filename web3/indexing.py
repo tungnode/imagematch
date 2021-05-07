@@ -14,10 +14,7 @@ from constants import resources_folder
 import time
 import gc
 from multiprocessing.managers import BaseManager
-BaseManager.register('get_queue')
-m = BaseManager(address=('127.0.0.1', 50000), authkey=b'abracadabra')
-m.connect()
-vector_feature_queue = m.get_queue()
+
 class NumpyArrayEncoder(JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.ndarray):
@@ -25,6 +22,12 @@ class NumpyArrayEncoder(JSONEncoder):
         return JSONEncoder.default(self, obj)
 if __name__ == "__main__":
     
+        BaseManager.register('get_features_queue')
+        BaseManager.register('get_indexed_files_dict')
+        m = BaseManager(address=('127.0.0.1', 50000), authkey=b'abracadabra')
+        m.connect()
+        vector_feature_queue = m.get_features_queue()
+        indexed_files = m.get_indexed_files_dict()
         data_set = []
         index_to_file_name = {}
         start_time = time.time()
@@ -37,14 +40,14 @@ if __name__ == "__main__":
 
         read_file =  open(vector_index_file_names_path, "r")
         index_to_file_name = json.load(read_file)
-        files_in_index = {}
-        read_file = open(resources_folder+"index_to_file_name.json", "r")
-        index_to_file_name = json.load(read_file)
-        for name in index_to_file_name.values():
-            name = name[name.rfind('\\'):]
-            name = name[:name.find('.')]
-            name = name.lower()
-            files_in_index[name] = name
+        # files_in_index = {}
+        # read_file = open(resources_folder+"index_to_file_name.json", "r")
+        # index_to_file_name = json.load(read_file)
+        # for name in index_to_file_name.values():
+        #     name = name[name.rfind('\\'):]
+        #     name = name[:name.find('.')]
+        #     name = name.lower()
+        #     files_in_index[name] = name
         
         indexed_number = len(index_to_file_name)
         vector_features_batch_number = len(next(os.walk(resources_folder+"vector_features_batches"))[2])
@@ -94,12 +97,13 @@ if __name__ == "__main__":
                     file_path = resources_folder + "vectors\\"+address_token_img_type+".npz"
                     key_of_files_in_index = "\\"+address_token_img_type.split(".")[0]
                     key_of_files_in_index = key_of_files_in_index.lower()
-                    if files_in_index.get(key_of_files_in_index) != None:
+                    if indexed_files.get(key_of_files_in_index) != None:
+                        print("file was indexed",address_token_img_type)
                         continue
                     print("--------------- indexing",address_token_img_type)
                     data_set.append(features_set)                
                     index_to_file_name[str(indexed_number)] = file_path
-                    files_in_index[key_of_files_in_index] = file_path
+                    indexed_files.update({key_of_files_in_index:file_path})
                     indexed_number += 1
                     counter += 1
                     number_features_in_batch -= 1
