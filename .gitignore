@@ -7,6 +7,8 @@
 /matched*
 /lab*
 /.history
-/prod_data*
+prod_data/*
+!*prod_data/index_to_file_name.json
+!*prod_data/nonExistTokens.json
 /web3/__pycache*
 /.cache*
