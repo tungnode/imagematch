@@ -10,5 +10,6 @@
 prod_data/*
 !*prod_data/index_to_file_name.json
 !*prod_data/nonExistTokens.json
+!*prod_data/addresses_tokens_owners_data.json
 /web3/__pycache*
 /.cache*
