@@ -172,12 +172,6 @@ def img_vectorizing_worker(img_file_paths_queue:multiprocessing.Queue,features_q
             continue
     print("Finished processing images")
 
-def update_indexed_item_dict_worker(indexed_file_queue:Queue, indexed_file_dict):
-    while True:
-        indexed_file = indexed_file_queue.get()
-        if indexed_file == None:
-            break
-        indexed_file_dict[indexed_file] = indexed_file
 
 if __name__ == "__main__":
     
@@ -264,7 +258,7 @@ if __name__ == "__main__":
         # download_4.start()
         # download_5.start()
         processing_worker.start()
-
+      
         # chain_id: int, web3: Web3, abi: dict, state: EventScannerState, events: List, filters: {}, max_chunk_scan_size: int=10000
         scanner = EventScanner(
             indexed_files=indexed_files,

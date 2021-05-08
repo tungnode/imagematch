@@ -62,7 +62,7 @@ def is_already_exist(master_file_name,neighbor_file_name):
         return True
 def annoy_similarity(file_index_to_file_name,file_index_to_file_vector):
     
-    n_nearest_neighbors = 2
+    n_nearest_neighbors = 10
     trees = 10000
     t = AnnoyIndex(dims, metric='angular')
     for k in file_index_to_file_vector:
@@ -158,7 +158,8 @@ if __name__ == '__main__':
             json.dump(index_to_file_name,  out)
 
     total_files = len(index_to_file_name)
-    print("============== total files",total_files)
+    print("============== total items in index_to_file_name",total_files)
+    print("============== total items in data_set",len(data_set))
     index = hnswlib.Index(space='cosine', dim=dims) # possible options are l2, cosine or ip
     if path.exists(index_file_path) == False:
         index.init_index(max_elements = total_files,ef_construction = 2000, M = 16)
@@ -199,7 +200,7 @@ if __name__ == '__main__':
     annoy_file_index_to_file_vector = {}
 
     # all_nearest_data = index.knnQueryBatch(data_set, k=10, num_threads=4)
-    labels, distances = index.knn_query(data_set, k=2) 
+    labels, distances = index.knn_query(data_set, k=10) 
     named_nearest_neighbors = []
     for master_index, master in enumerate(distances):
        
