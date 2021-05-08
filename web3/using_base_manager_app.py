@@ -27,7 +27,7 @@ import time
 import gc
 import httplib2
 from multiprocessing.managers import BaseManager
-
+import threading
 
 class NumpyArrayEncoder(JSONEncoder):
     def default(self, obj):
@@ -93,6 +93,12 @@ def vectorized_image(image_name,image_content,tfhub_module):
             # del feature_set
             # return None
             return feature_set
+
+def download_process(img_urls_queue:multiprocessing.Queue, img_file_paths_queue:multiprocessing.Queue,retry_queue:multiprocessing.Queue):
+    thread_1 = threading.Thread(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
+    thread_1.start()
+    download_images_worker(img_urls_queue,img_file_paths_queue,retry_queue)
+    thread_1.join()
 def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_queue:multiprocessing.Queue,retry_queue:multiprocessing.Queue):
     gateway_queue = Queue()
     gateway_queue.put('https://ipfs.io/')
@@ -125,7 +131,7 @@ def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_
             # put it back so it will be handle by other gateways
             # TODO: need to check specific error
             try:
-                if retry_number <= 3:
+                if retry_number <= 10:
                     retry_number += 1
                     retry_queue.put_nowait((address_token,url,retry_number))
             except Exception as e:
@@ -226,7 +232,7 @@ if __name__ == "__main__":
         # Restore/create our persistent state
         state = JSONifiedState()
         state.restore()
-        queue_size = 10
+        queue_size = 20
         img_urls_queue = multiprocessing.Queue(maxsize=queue_size)
         img_file_paths_queue = multiprocessing.Queue(maxsize=queue_size)
         retry_queue = multiprocessing.Queue(maxsize=0)
@@ -237,26 +243,22 @@ if __name__ == "__main__":
         m.connect()
         features_queue = m.get_features_queue()
         indexed_files = m.get_indexed_files_dict()
-        # files_in_index = multiprocessing_manager.dict()
-        # read_file = open(resources_folder+"index_to_file_name.json", "r")
-        # index_to_file_name = json.load(read_file)
-        # for name in index_to_file_name.values():
-        #     name = name[name.rfind('\\'):]
-        #     name = name[:name.find('.')]
-        #     name = name.lower()
-        #     files_in_index[name] = name
-        download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
-        second_download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
-        third_download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
-        fourth_download_worker = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
+       
+        download_1 = multiprocessing.Process(target=download_process,args=(img_urls_queue,img_file_paths_queue,retry_queue))
+        # download_2 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
+        # download_3 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
+        # download_4 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
+        # download_5 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
 
         processing_worker = multiprocessing.Process(target=img_vectorizing_worker,args=(img_file_paths_queue,features_queue))
         
-        download_worker.start()
+        download_1.start() 
+        # download_2.start()
+        # download_3.start()
+        # download_4.start()
+        # download_5.start()
         processing_worker.start()
-        second_download_worker.start()
-        third_download_worker.start()
-        fourth_download_worker.start()
+      
         # chain_id: int, web3: Web3, abi: dict, state: EventScannerState, events: List, filters: {}, max_chunk_scan_size: int=10000
         scanner = EventScanner(
             indexed_files=indexed_files,
@@ -283,8 +285,8 @@ if __name__ == "__main__":
 
         # Scan from [last block scanned] - [latest ethereum block]
         # Note that our chain reorg safety blocks cannot go negative
-        start_block = 12080863  # max(state.get_last_scanned_block() - chain_reorg_safety_blocks, 0)
-        end_block = 12380863 #scanner.get_suggested_scan_end_block() 12380863
+        start_block = 11881985  # max(state.get_last_scanned_block() - chain_reorg_safety_blocks, 0)
+        end_block = 11883985# scanner.get_suggested_scan_end_block()
         blocks_to_scan = end_block - start_block
 
         print(f"Scanning events from blocks {start_block} - {end_block}")
@@ -304,15 +306,17 @@ if __name__ == "__main__":
             result, total_chunks_scanned = scanner.scan(start_block, end_block, progress_callback=_update_progress)
             img_urls_queue.put((None,None,None))
             img_urls_queue.put((None,None,None))
-            img_urls_queue.put((None,None,None))
-            img_urls_queue.put((None,None,None))
+            # img_urls_queue.put((None,None,None))
+            # img_urls_queue.put((None,None,None))
+            # img_urls_queue.put((None,None,None))
 
         state.save()
         
-        download_worker.join()
-        second_download_worker.join()
-        third_download_worker.join()
-        fourth_download_worker.join()
+        download_1.join()
+        # download_2.join()
+        # download_3.join()
+        # download_4.join()
+        # download_5.join()
         processing_worker.join()
         
         # update_indexed_item_dict_worker.join()
