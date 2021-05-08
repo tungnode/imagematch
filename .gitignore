@@ -1,5 +1,6 @@
 /.idea
 /.vs
+/.vscode*
 /images
 /vectors*
 /matched*
@@ -13,3 +14,7 @@ prod_data/*
 !*prod_data/addresses_tokens_owners_data.json
 /web3/__pycache*
 /.cache*
+/hot_matches*
+/test_data*
+/corrupted*
+/lib*
