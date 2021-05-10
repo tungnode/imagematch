@@ -48,7 +48,7 @@ class EventScanner:
     because it cannot correctly throttle and decrease the `eth_getLogs` block number range.
     """
 
-    def __init__(self,indexed_files:dict,retry_queue:multiprocessing.Queue, img_urls_queue:multiprocessing.Queue, web3: Web3, contract: Contract, state: EventScannerState, events: List, filters: {},
+    def __init__(self,indexed_files:dict, img_urls_queue:multiprocessing.Queue, web3: Web3, contract: Contract, state: EventScannerState, events: List, filters: {},
                  max_chunk_scan_size: int = 10000, max_request_retries: int = 30, request_retry_seconds: float = 3.0):
         """
         :param contract: Contract
@@ -59,7 +59,6 @@ class EventScanner:
         :param request_retry_seconds: Delay between failed requests to let JSON-RPC server to recover
         """
         self.indexed_files = indexed_files
-        self.retry_queue = retry_queue
         self.img_urls_queue = img_urls_queue
         self.logger = logger
         self.contract = contract
@@ -69,7 +68,7 @@ class EventScanner:
         self.filters = filters
 
         # Our JSON-RPC throttling parameters
-        self.min_scan_chunk_size = 1000  # 12 s/block = 120 seconds period
+        self.min_scan_chunk_size = 3000  # 12 s/block = 120 seconds period
         self.max_scan_chunk_size = max_chunk_scan_size
         self.max_request_retries = max_request_retries
         self.request_retry_seconds = request_retry_seconds
@@ -177,15 +176,10 @@ class EventScanner:
                 logger.debug("Processing event %s, block:%d count:%d", evt["event"], evt["blockNumber"])
                 address_token,ipfs_url,processed = self.state.process_event(self.indexed_files,self.web3, evt)
                 if ipfs_url != None:
-                    self.img_urls_queue.put((address_token,ipfs_url,1))
+                    self.img_urls_queue.put((address_token,ipfs_url))
                
                 all_processed.append(processed)
             
-            while True:    
-                try:
-                    self.img_urls_queue.put(self.retry_queue.get_nowait())
-                except Exception as e:
-                    break
 
         end_block_timestamp = None#get_block_when(end_block)
         return end_block, end_block_timestamp, all_processed
@@ -260,7 +254,7 @@ class EventScanner:
 
             start = time.time()
             actual_end_block, end_block_timestamp, new_entries = self.scan_chunk(current_block, estimated_end_block)
-
+            
             # Where does our current chunk scan ends - are we out of chain yet?
             current_end = actual_end_block
 

@@ -53,7 +53,7 @@ def download_image(gateway,address_token,url):
         headers = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.75 Safari/537.36'}
         (res_headers,image_response) = requestMaker.request(url,"GET",headers=headers)
         
-        if res_headers.status == 200 and len(image_response) > 0:
+        if res_headers.status == 200:
             # Set decode_content value to True, otherwise the downloaded image file's size will be zero.
             # image_response.raw.decode_content = True
             
@@ -62,8 +62,6 @@ def download_image(gateway,address_token,url):
             #     shutil.copyfileobj(image_response.raw, f)
             return file_name_with_extension, image_response
         else:
-            if len(image_response) == 0:
-                print("empty image")
             return None,None
 
 
@@ -99,46 +97,40 @@ def download_process(img_urls_queue:multiprocessing.Queue, img_file_paths_queue:
     thread_1.start()
     download_images_worker(img_urls_queue,img_file_paths_queue,retry_queue)
     thread_1.join()
-def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_queue:multiprocessing.Queue,retry_queue:multiprocessing.Queue):
+def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_queue:multiprocessing.Queue):
     gateway_queue = Queue()
     gateway_queue.put('https://ipfs.io/')
     gateway_queue.put('https://gateway.ipfs.io/')
     gateway_queue.put('https://ipfs.drink.cafe/')
     gateway_queue.put('https://dweb.link/')
-    gateway_queue.put('https://infura.io/')
-    gateway_queue.put('https://gateway.pinata.cloud/')
-    gateway_queue.put('https://ipfs.fleek.co/')
-    gateway_queue.put('https://cloudflare-ipfs.com/')
-    gateway_queue.put('https://ipfs.denarius.io/')
-    gateway_queue.put('https://cf-ipfs.com/')
+    # gateway_queue.put('https://ipfs.infura.io/')
+    # gateway_queue.put('https://cloudflare-ipfs.com/')
+    
     while True:
         try:
-            
-            gateway = gateway_queue.get()
-            address_token,url,retry_number = img_urls_queue.get()
-            if address_token is None and url is None:
-                img_file_paths_queue.put((None,None))
-                break
-            print("############### downloading {} from {}".format(address_token,url))
-            address_token_img_type,img_content = download_image(gateway,address_token,url)
-            if address_token_img_type is not None:
-                img_file_paths_queue.put((address_token_img_type,img_content))
-            else:
-                print("Unable to download image {} from url {}".format(address_token,url))
-            del img_content
+            retry_counter = gateway_queue.qsize()
+            address_token,url = img_urls_queue.get()
+            while retry_counter > 0:
+                gateway = gateway_queue.get()
+                if address_token is None and url is None:
+                    img_file_paths_queue.put((None,None))
+                    return
+                print("############### downloading {} from {}".format(address_token,url))
+                address_token_img_type,img_content = download_image(gateway,address_token,url)
+                if address_token_img_type is not None and img_content is not None:
+                    if len(img_content) > 0:
+                        img_file_paths_queue.put((address_token_img_type,img_content))
+                    break
+                elif address_token_img_type is not None and img_content is None:
+                    img_file_paths_queue.put((address_token_img_type,img_content))
+                    break
+                else:
+                    print("Unable to download image {} from url {}, will try other gateway".format(address_token,url))
+                del img_content
         except Exception as e:
             print("Exception while downloading image:",e)
-            # put it back so it will be handle by other gateways
-            # TODO: need to check specific error
-            try:
-                if retry_number <= 10:
-                    retry_number += 1
-                    retry_queue.put_nowait((address_token,url,retry_number))
-            except Exception as e:
-                print('Error while putting retry file into retry queue',e)
-            time.sleep(5)    
-            continue
         finally:
+            retry_counter -= 1
             gateway_queue.put(gateway)
     print("Finished downloading images")
 
@@ -151,6 +143,7 @@ def img_vectorizing_worker(img_file_paths_queue:multiprocessing.Queue,features_q
         try:
             
             address_token_img_type,img_content = img_file_paths_queue.get()
+            print(img_file_paths_queue.qsize())
             if address_token_img_type is None and img_content is None:
                 features_queue.put((None,None))
                 break
@@ -171,6 +164,7 @@ def img_vectorizing_worker(img_file_paths_queue:multiprocessing.Queue,features_q
             print("Exception while processing image:",e)
             continue
     print("Finished processing images")
+
 
 
 if __name__ == "__main__":
@@ -203,13 +197,14 @@ if __name__ == "__main__":
 
     
 
+
     def run():
 
         # if len(sys.argv) < 2:
         #     print("Usage: eventscanner.py http://your-node-url")
         #     sys.exit(1)
 
-        api_url = 'https://mainnet.infura.io/v3/efdca0ddba8943dbbff758c6e75e4ed9'#sys.argv[1]
+        api_url = 'https://mainnet.infura.io/v3/a671a77998514426b1ca3733157fb5ab'#sys.argv[1]
 
         # Enable logs to the stdout.
         # DEBUG is very verbose level
@@ -235,26 +230,25 @@ if __name__ == "__main__":
         queue_size = 20
         img_urls_queue = multiprocessing.Queue(maxsize=queue_size)
         img_file_paths_queue = multiprocessing.Queue(maxsize=queue_size)
-        retry_queue = multiprocessing.Queue(maxsize=0)
 
         BaseManager.register('get_features_queue')
         BaseManager.register('get_indexed_files_dict')
-        m = BaseManager(address=('192.168.0.4', 50000), authkey=b'abracadabra')
+        m = BaseManager(address=('192.168.0.11', 50000), authkey=b'abracadabra')
         m.connect()
         features_queue = m.get_features_queue()
         indexed_files = m.get_indexed_files_dict()
        
-        download_1 = multiprocessing.Process(target=download_process,args=(img_urls_queue,img_file_paths_queue,retry_queue))
-        # download_2 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
-        # download_3 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
+        download_1 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue))
+        download_2 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue))
+        download_3 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue))
         # download_4 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
         # download_5 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
 
         processing_worker = multiprocessing.Process(target=img_vectorizing_worker,args=(img_file_paths_queue,features_queue))
         
         download_1.start() 
-        # download_2.start()
-        # download_3.start()
+        download_2.start()
+        download_3.start()
         # download_4.start()
         # download_5.start()
         processing_worker.start()
@@ -262,7 +256,6 @@ if __name__ == "__main__":
         # chain_id: int, web3: Web3, abi: dict, state: EventScannerState, events: List, filters: {}, max_chunk_scan_size: int=10000
         scanner = EventScanner(
             indexed_files=indexed_files,
-            retry_queue=retry_queue,
             img_urls_queue=img_urls_queue,
             web3=web3,
             contract=ERC721,
@@ -272,7 +265,7 @@ if __name__ == "__main__":
             # How many maximum blocks at the time we request from JSON-RPC
             # and we are unlikely to exceed the response size limit of the JSON-RPC server
             # max_chunk_scan_size=10000
-            max_chunk_scan_size=1000
+            max_chunk_scan_size=5000
         )
 
         # Assume we might have scanned the blocks all the way to the last Ethereum block
@@ -285,13 +278,11 @@ if __name__ == "__main__":
 
         # Scan from [last block scanned] - [latest ethereum block]
         # Note that our chain reorg safety blocks cannot go negative
-        start_block = 11881985  # max(state.get_last_scanned_block() - chain_reorg_safety_blocks, 0)
-        end_block = 11883985# scanner.get_suggested_scan_end_block()
+        start_block = 12377000  # max(state.get_last_scanned_block() - chain_reorg_safety_blocks, 0)
+        end_block =  scanner.get_suggested_scan_end_block()
         blocks_to_scan = end_block - start_block
 
         print(f"Scanning events from blocks {start_block} - {end_block}")
-
-        # Render a progress bar in the console
         start = time.time()
         with tqdm(total=blocks_to_scan) as progress_bar:
             def _update_progress(start, end, current, current_block_timestamp, chunk_size, events_count):
@@ -304,17 +295,21 @@ if __name__ == "__main__":
 
             # Run the scan
             result, total_chunks_scanned = scanner.scan(start_block, end_block, progress_callback=_update_progress)
-            img_urls_queue.put((None,None,None))
-            img_urls_queue.put((None,None,None))
-            # img_urls_queue.put((None,None,None))
-            # img_urls_queue.put((None,None,None))
-            # img_urls_queue.put((None,None,None))
+
+            img_urls_queue.put((None,None))
+            img_urls_queue.put((None,None))
+            img_urls_queue.put((None,None))
+            # img_urls_queue.put((None,None))
+            # img_urls_queue.put((None,None))
+            # img_urls_queue.put((None,None))
+            # img_urls_queue.put((None,None))
+            # img_urls_queue.put((None,None))
 
         state.save()
         
         download_1.join()
-        # download_2.join()
-        # download_3.join()
+        download_2.join()
+        download_3.join()
         # download_4.join()
         # download_5.join()
         processing_worker.join()
