@@ -278,7 +278,7 @@ if __name__ == "__main__":
 
         # Scan from [last block scanned] - [latest ethereum block]
         # Note that our chain reorg safety blocks cannot go negative
-        start_block = 12374000  # max(state.get_last_scanned_block() - chain_reorg_safety_blocks, 0)
+        start_block = 12377000  # max(state.get_last_scanned_block() - chain_reorg_safety_blocks, 0)
         end_block =  scanner.get_suggested_scan_end_block()
         blocks_to_scan = end_block - start_block
 
@@ -296,14 +296,14 @@ if __name__ == "__main__":
             # Run the scan
             result, total_chunks_scanned = scanner.scan(start_block, end_block, progress_callback=_update_progress)
 
-            img_urls_queue.put((None,None,None))
-            img_urls_queue.put((None,None,None))
-            img_urls_queue.put((None,None,None))
-            # img_urls_queue.put((None,None,None))
-            # img_urls_queue.put((None,None,None))
-            # img_urls_queue.put((None,None,None))
-            # img_urls_queue.put((None,None,None))
-            # img_urls_queue.put((None,None,None))
+            img_urls_queue.put((None,None))
+            img_urls_queue.put((None,None))
+            img_urls_queue.put((None,None))
+            # img_urls_queue.put((None,None))
+            # img_urls_queue.put((None,None))
+            # img_urls_queue.put((None,None))
+            # img_urls_queue.put((None,None))
+            # img_urls_queue.put((None,None))
 
         state.save()
         
