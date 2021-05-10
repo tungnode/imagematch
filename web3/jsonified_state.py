@@ -32,15 +32,12 @@ class JSONifiedState(EventScannerState):
             self.gateway_queue.put('https://gateway.ipfs.io/')
             self.gateway_queue.put('https://ipfs.drink.cafe/')
             self.gateway_queue.put('https://dweb.link/')
-            self.gateway_queue.put('https://infura.io/')
-            self.gateway_queue.put('https://gateway.pinata.cloud/')
-            self.gateway_queue.put('https://ipfs.fleek.co/')
-            self.gateway_queue.put('https://cloudflare-ipfs.com/')
-            self.gateway_queue.put('https://ipfs.denarius.io/')
-            self.gateway_queue.put('https://cf-ipfs.com/')
-            self.gateway_queue.put('https://10.via0.com/')
-            self.gateway_queue.put('https://bin.d0x.to/')
-            self.gateway_queue.put('https://ipfs.itargo.io/')
+            # self.gateway_queue.put('https://ipfs.fleek.co/')
+            # self.gateway_queue.put('https://cloudflare-ipfs.com/')
+            # self.gateway_queue.put('https://ipfs.denarius.io/')
+            # self.gateway_queue.put('https://cf-ipfs.com/')
+            # self.gateway_queue.put('https://10.via0.com/')
+            # self.gateway_queue.put('https://bin.d0x.to/')
         def reset(self):
             """Create initial state of nothing scanned."""
             self.state = {
@@ -108,76 +105,73 @@ class JSONifiedState(EventScannerState):
             if time.time() - self.last_save > 60:
                 self.save()
         
-        def get_token_uri(self, web3, contract_address, token_id,retry_number):
-            gateway = self.gateway_queue.get()
+        def get_token_uri(self, web3, contract_address, token_id):
+            
             key = contract_address+"_"+str(token_id)
-            try:
-                simplified_abi = [{
-                    "constant": True,
-                    "inputs": [
-                        {
-                            "internalType": "uint256",
-                            "name": "tokenId",
-                            "type": "uint256"
-                        }
-                    ],
-                    "name": "tokenURI",
-                    "outputs": [
-                        {
-                            "internalType": "string",
-                            "name": "",
-                            "type": "string"
-                        }
-                    ],
-                    "payable": False,
-                    "stateMutability": "view",
-                    "type": "function"
-                }]
-                contract = web3.eth.contract(address=web3.toChecksumAddress(contract_address), abi=simplified_abi)
-                img_uri = contract.functions.tokenURI(token_id).call()
-                token_uri = img_uri
-                if img_uri != None and img_uri != '':
-                    if img_uri.startswith('http') == False:
+            retry_counter = self.gateway_queue.qsize()
+            while retry_counter > 0:
+                gateway = self.gateway_queue.get()
+                try:
+                    simplified_abi = [{
+                        "constant": True,
+                        "inputs": [
+                            {
+                                "internalType": "uint256",
+                                "name": "tokenId",
+                                "type": "uint256"
+                            }
+                        ],
+                        "name": "tokenURI",
+                        "outputs": [
+                            {
+                                "internalType": "string",
+                                "name": "",
+                                "type": "string"
+                            }
+                        ],
+                        "payable": False,
+                        "stateMutability": "view",
+                        "type": "function"
+                    }]
+                    contract = web3.eth.contract(address=web3.toChecksumAddress(contract_address), abi=simplified_abi)
+                    img_uri = contract.functions.tokenURI(token_id).call()
+                    token_uri = img_uri
+                    if img_uri != None and img_uri != '':
+                        if img_uri.startswith('http') == False:
+                            
+                            img_uri = gateway+img_uri[img_uri.rindex('ipfs'):]
                         
-                        img_uri = gateway+img_uri[img_uri.rindex('ipfs'):]
-                    # headers = { 
-                    #     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36', 
-                    #     'ACCEPT':'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
-                    #     'ACCEPT-ENCODING':'gzip, deflate, br'
-                    #     
-                    # 
-                    headers = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.75 Safari/537.36'}
+                        headers = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.75 Safari/537.36'}
 
-                    requestMaker = httplib2.Http(".cache")
-                    (res_headers,json_response) = requestMaker.request(img_uri,"GET",headers=headers)
-                    try:
-                        img_uri = json.loads(json_response)['image']
-                        external_url = json.loads(json_response)['external_url']
-                        if img_uri.find('.webp') > 0 or img_uri.find('.mp4') > 0:
+                        requestMaker = httplib2.Http(".cache")
+                        start_time = time.time()
+                        (res_headers,raw_response) = requestMaker.request(img_uri,"GET",headers=headers)
+                        end_time = time.time()
+                        spent_time = end_time-start_time
+                        print("============== "+gateway+" took "+str(spent_time))
+                        if res_headers.status != 200:
+                            print("===============",raw_response)
+                            continue
+                        json_response = json.loads(raw_response)
+                        img_uri = json_response.get('image')
+                        external_url = json_response.get("external_url")
+                        if img_uri is None or img_uri.find('.webp') > 0 or img_uri.find('.mp4') > 0:
+                            self.non_exist_tokens[key] = key
                             return None,None,None
                         else:
                             return token_uri,img_uri,external_url
-                    except Exception as e:
+                    
+                except Exception as e:
+                    if str(e).find("nonexistent token") > 0:
                         self.non_exist_tokens[key] = key
                         return None,None,None
-                else:
-                    return None,None,None    
-                
-            except Exception as e:
-                print("Exception while getting token URI",e)
-                if str(e).find("nonexistent token") > 0:
-                    self.non_exist_tokens[key] = key
-                elif str(e).find('image') < 0:
-                 
-                    print("sleeping",retry_number*5)
-                    time.sleep(retry_number*5)
-                    if retry_number <= 3:
-                        retry_number += 1
-                        return self.get_token_uri(web3,contract_address,token_id,retry_number)    
-
-                return None,None,None
-            finally:
-                self.gateway_queue.put(gateway)    
+                    else:
+                        print("======== Exception while getting token URI",e)
+                    
+                finally:
+                    retry_counter -=1    
+                    self.gateway_queue.put(gateway)
+            return None,None,None    
                         
         def add_owners_to_state(self,address_token,owners,token_uri,img_uri):
             existing_owners = self.address_token_owners.get(address_token)
@@ -231,7 +225,7 @@ class JSONifiedState(EventScannerState):
             img_uri = None
             if (self.non_exist_tokens.get(address_token) == None
                 and indexed_files.get("\\"+address_token) == None):
-                    token_uri,img_uri,external_url = self.get_token_uri(web3,event['address'],args.tokenId,1)
+                    token_uri,img_uri,external_url = self.get_token_uri(web3,event['address'],args.tokenId)
                     if external_url is not None:
                         transfer['external_url'] = external_url
             if token_uri is not None and img_uri is not None:
