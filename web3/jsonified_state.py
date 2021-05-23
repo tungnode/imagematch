@@ -1,6 +1,7 @@
 from event_scanner_state import EventScannerState
 from web3 import Web3
 import shutil
+import logging
 import json
 import datetime
 import time
@@ -11,6 +12,8 @@ from os import path
 import httplib2
 from constants import resources_folder
 from multiprocessing import Manager
+from util import create_headers
+
 class JSONifiedState(EventScannerState):
         """Store the state of scanned blocks and all events.
 
@@ -136,21 +139,22 @@ class JSONifiedState(EventScannerState):
                     contract = web3.eth.contract(address=web3.toChecksumAddress(contract_address), abi=simplified_abi)
                     img_uri = contract.functions.tokenURI(token_id).call()
                     token_uri = img_uri
+                    path_header = img_uri
                     if img_uri != None and img_uri != '':
                         if img_uri.startswith('http') == False:
-                            
-                            img_uri = gateway+img_uri[img_uri.rindex('ipfs'):]
+                            path = img_uri[img_uri.rindex('ipfs'):]
+                            img_uri = gateway+path
                         
-                        headers = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.75 Safari/537.36'}
+                        # headers = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'}
 
                         requestMaker = httplib2.Http(".cache")
                         start_time = time.time()
-                        (res_headers,raw_response) = requestMaker.request(img_uri,"GET",headers=headers)
+                        (res_headers,raw_response) = requestMaker.request(img_uri,"GET",headers=create_headers(gateway[gateway.rindex('//')+2:len(gateway)-1],path))
                         end_time = time.time()
                         spent_time = end_time-start_time
-                        print("============== "+gateway+" took "+str(spent_time))
+                        logging.debug("============== %s took %s",gateway,str(spent_time))
                         if res_headers.status != 200:
-                            print("===============",raw_response)
+                            logging.debug("=============== %s",raw_response)
                             continue
                         json_response = json.loads(raw_response)
                         img_uri = json_response.get('image')
@@ -166,7 +170,11 @@ class JSONifiedState(EventScannerState):
                         self.non_exist_tokens[key] = key
                         return None,None,None
                     else:
-                        print("======== Exception while getting token URI",e)
+                        if retry_counter == 1:
+                            logging.error("Getting token data {} {} {} {}".format(img_uri,contract_address,token_id,e))
+                        else:
+                            time.sleep(retry_counter)
+                        
                     
                 finally:
                     retry_counter -=1    

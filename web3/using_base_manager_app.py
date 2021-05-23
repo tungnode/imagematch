@@ -28,7 +28,9 @@ import gc
 import httplib2
 from multiprocessing.managers import BaseManager
 import threading
+from util import create_headers
 
+logging.basicConfig(level=logging.ERROR)
 class NumpyArrayEncoder(JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.ndarray):
@@ -43,15 +45,17 @@ def is_vector_feature_exist(address_token):
 def download_image(gateway,address_token,url):
         dot_location =  url.lower().rfind(".")
         file_type = url[dot_location:] if dot_location > 0 else ""
+        path_header = url
         if url.startswith('http') == False:
-            url = gateway+url[url.rindex('ipfs'):]
+            path = url[url.rindex('ipfs'):]
+            url = gateway+path
 
         file_name_with_extension = address_token+file_type
         if is_vector_feature_exist(file_name_with_extension)  == True:
             return file_name_with_extension,None
         requestMaker = httplib2.Http(".cache")
-        headers = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.75 Safari/537.36'}
-        (res_headers,image_response) = requestMaker.request(url,"GET",headers=headers)
+        # headers = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'}
+        (res_headers,image_response) = requestMaker.request(url,"GET",headers=create_headers(gateway[gateway.rindex('//')+2:len(gateway)-1],path))
         
         if res_headers.status == 200:
             # Set decode_content value to True, otherwise the downloaded image file's size will be zero.
@@ -115,8 +119,9 @@ def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_
                 if address_token is None and url is None:
                     img_file_paths_queue.put((None,None))
                     return
-                print("############### downloading {} from {}".format(address_token,url))
+                
                 address_token_img_type,img_content = download_image(gateway,address_token,url)
+                # print("############### downloaded {} from {}".format(address_token,url))
                 if address_token_img_type is not None and img_content is not None:
                     if len(img_content) > 0:
                         img_file_paths_queue.put((address_token_img_type,img_content))
@@ -125,10 +130,14 @@ def download_images_worker(img_urls_queue:multiprocessing.Queue, img_file_paths_
                     img_file_paths_queue.put((address_token_img_type,img_content))
                     break
                 else:
-                    print("Unable to download image {} from url {}, will try other gateway".format(address_token,url))
+                    logging.info("!!!!!!!!!!!!!! {} Unable to download image {} from url {}, will try other gateway".format(gateway,address_token,url))
                 del img_content
         except Exception as e:
-            print("Exception while downloading image:",e)
+            if retry_counter == 1:
+                logging.error("Downloading images {} {} {}".format(address_token,url,e))
+            else:
+                time.sleep(retry_counter)
+            
         finally:
             retry_counter -= 1
             gateway_queue.put(gateway)
@@ -143,17 +152,17 @@ def img_vectorizing_worker(img_file_paths_queue:multiprocessing.Queue,features_q
         try:
             
             address_token_img_type,img_content = img_file_paths_queue.get()
-            print(img_file_paths_queue.qsize())
+            logging.info(img_file_paths_queue.qsize())
             if address_token_img_type is None and img_content is None:
                 features_queue.put((None,None))
                 break
             
             if img_content is not None:
-                print("=============== vectorizing",address_token_img_type)
+                logging.info("=============== vectorizing %s",address_token_img_type)
                 features_set = vectorized_image(address_token_img_type,img_content,tfhub_module)
                 features_queue.put((address_token_img_type,features_set))
             else:
-                print("=============== loading vector feature",address_token_img_type)
+                logging.info("=============== loading vector feature %s",address_token_img_type)
                 features_set = np.loadtxt(resources_folder+"vectors\\"+address_token_img_type+".npz")
 
                 features_queue.put((address_token_img_type,features_set))
@@ -161,7 +170,7 @@ def img_vectorizing_worker(img_file_paths_queue:multiprocessing.Queue,features_q
             gc.collect()
             
         except Exception as e:
-            print("Exception while processing image:",e)
+            logging.error("Vectorizing {} {}".format(address_token_img_type,e))
             continue
     print("Finished processing images")
 
@@ -233,14 +242,14 @@ if __name__ == "__main__":
 
         BaseManager.register('get_features_queue')
         BaseManager.register('get_indexed_files_dict')
-        m = BaseManager(address=('192.168.0.11', 50000), authkey=b'abracadabra')
+        m = BaseManager(address=('192.168.0.4', 50000), authkey=b'abracadabra')
         m.connect()
         features_queue = m.get_features_queue()
         indexed_files = m.get_indexed_files_dict()
        
         download_1 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue))
         download_2 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue))
-        download_3 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue))
+        # download_3 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue))
         # download_4 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
         # download_5 = multiprocessing.Process(target=download_images_worker,args=(img_urls_queue,img_file_paths_queue,retry_queue))
 
@@ -248,7 +257,7 @@ if __name__ == "__main__":
         
         download_1.start() 
         download_2.start()
-        download_3.start()
+        # download_3.start()
         # download_4.start()
         # download_5.start()
         processing_worker.start()
@@ -278,7 +287,7 @@ if __name__ == "__main__":
 
         # Scan from [last block scanned] - [latest ethereum block]
         # Note that our chain reorg safety blocks cannot go negative
-        start_block = 12377000  # max(state.get_last_scanned_block() - chain_reorg_safety_blocks, 0)
+        start_block = 12491080  # max(state.get_last_scanned_block() - chain_reorg_safety_blocks, 0)
         end_block =  scanner.get_suggested_scan_end_block()
         blocks_to_scan = end_block - start_block
 
@@ -298,7 +307,7 @@ if __name__ == "__main__":
 
             img_urls_queue.put((None,None))
             img_urls_queue.put((None,None))
-            img_urls_queue.put((None,None))
+            # img_urls_queue.put((None,None))
             # img_urls_queue.put((None,None))
             # img_urls_queue.put((None,None))
             # img_urls_queue.put((None,None))
@@ -309,7 +318,7 @@ if __name__ == "__main__":
         
         download_1.join()
         download_2.join()
-        download_3.join()
+        # download_3.join()
         # download_4.join()
         # download_5.join()
         processing_worker.join()
